@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 fun NumericKeypad(
   modifier: Modifier = Modifier,
   onDigit: (Int) -> Unit,
+  onDecimal: (() -> Unit)? = null,
+  onSignToggle: (() -> Unit)? = null,
   onBackspace: () -> Unit,
   onConfirm: (() -> Unit)?,
 ) {
@@ -70,6 +72,16 @@ fun NumericKeypad(
       horizontalArrangement = Arrangement.spacedBy(10.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
+      if (onSignToggle != null) {
+        KeyButton(
+          label = "+/-",
+          modifier = Modifier.weight(1f),
+          bg = keyBg,
+          ink = ink,
+          onClick = onSignToggle,
+        )
+      }
+
       KeyButton(
         label = "0",
         modifier = Modifier.weight(1f),
@@ -77,6 +89,18 @@ fun NumericKeypad(
         ink = ink,
         onClick = { onDigit(0) },
       )
+
+      if (onDecimal != null) {
+        KeyButton(
+          label = ".",
+          modifier = Modifier.weight(1f),
+          bg = keyBg,
+          ink = ink,
+          onClick = onDecimal,
+        )
+      } else {
+        Spacer(modifier = Modifier.weight(1f))
+      }
 
       IconKeyButton(
         modifier = Modifier.weight(1f),
@@ -94,8 +118,6 @@ fun NumericKeypad(
         ) {
           Icon(Icons.Filled.CheckCircle, contentDescription = "Confirm", tint = accent)
         }
-      } else {
-        Spacer(modifier = Modifier.weight(1f))
       }
     }
   }

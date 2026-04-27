@@ -14,7 +14,6 @@ import com.ashokvatika.ui.admin.CartProductItem
 import com.ashokvatika.ui.admin.DashboardDestination
 import com.ashokvatika.ui.admin.InventoryItem
 import com.ashokvatika.ui.admin.InventoryListScreen
-import com.ashokvatika.ui.admin.CheckoutScreen
 import com.ashokvatika.ui.admin.OpenCartRow
 import com.ashokvatika.ui.admin.OpenCartScreen
 import com.ashokvatika.ui.admin.OtcScreen
@@ -27,7 +26,6 @@ private enum class Route {
   AdminHome,
   Otc,
   OpenCart,
-  Checkout,
   SavedDeals,
   InventoryList,
   InventoryEditor,
@@ -49,7 +47,7 @@ fun AppRoot() {
   var clientPhone by remember { mutableStateOf("") }
   var clientId by remember { mutableStateOf("") }
   var transactionCode by remember { mutableStateOf(generateTransactionCode()) }
-  var editingCartRowId by remember { mutableStateOf<String?>(null) }
+  val cartItemCount = openCartRows.size
 
   when (route) {
     Route.Landing -> LandingLoginScreen(
@@ -70,7 +68,7 @@ fun AppRoot() {
 
     Route.Otc -> OtcScreen(
       onBack = { route = Route.AdminHome },
-      cartCount = openCartRows.size,
+      cartCount = cartItemCount,
       onOpenCart = {
         if (openCartRows.isNotEmpty()) {
           route = Route.OpenCart
@@ -102,9 +100,22 @@ fun AppRoot() {
       onTransactionCodeChange = { transactionCode = it.uppercase(Locale.US) },
       onBack = { route = Route.Otc },
       onOpenSavedDeals = { route = Route.SavedDeals },
-      onEditRow = { rowId ->
-        editingCartRowId = rowId
-        route = Route.Checkout
+      onAddItemsToRow = { rowId, items ->
+        if (items.isEmpty()) return@OpenCartScreen
+        val index = openCartRows.indexOfFirst { it.id == rowId }
+        if (index >= 0) {
+          val row = openCartRows[index]
+          openCartRows[index] = row.copy(
+            items = row.items.mergeCartItems(items),
+            customAmount = null,
+          )
+        }
+      },
+      onUpdateRowAmount = { rowId, amount ->
+        val index = openCartRows.indexOfFirst { it.id == rowId }
+        if (index >= 0) {
+          openCartRows[index] = openCartRows[index].copy(customAmount = amount)
+        }
       },
       onUpdateRowTitle = { rowId, title ->
         val index = openCartRows.indexOfFirst { it.id == rowId }
@@ -123,14 +134,23 @@ fun AppRoot() {
               else -> item.copy(quantity = quantity)
             }
           }
-          openCartRows[index] = row.copy(items = updatedItems, customAmount = null)
+          if (updatedItems.isEmpty()) {
+            openCartRows.removeAt(index)
+          } else {
+            openCartRows[index] = row.copy(items = updatedItems, customAmount = null)
+          }
         }
       },
       onDeleteItem = { rowId, itemId ->
         val index = openCartRows.indexOfFirst { it.id == rowId }
         if (index >= 0) {
           val row = openCartRows[index]
-          openCartRows[index] = row.copy(items = row.items.filterNot { it.id == itemId }, customAmount = null)
+          val updatedItems = row.items.filterNot { it.id == itemId }
+          if (updatedItems.isEmpty()) {
+            openCartRows.removeAt(index)
+          } else {
+            openCartRows[index] = row.copy(items = updatedItems, customAmount = null)
+          }
         }
       },
       onDeleteRow = { rowId ->
@@ -163,36 +183,15 @@ fun AppRoot() {
           clientPhone = ""
           clientId = ""
           transactionCode = generateTransactionCode()
-          editingCartRowId = null
           route = Route.SavedDeals
         }
       },
     )
 
-    Route.Checkout -> {
-      val currentRow = openCartRows.firstOrNull { it.id == editingCartRowId }
-      if (currentRow == null) {
-        route = Route.OpenCart
-      } else {
-        CheckoutScreen(
-          row = currentRow,
-          cartCount = openCartRows.size,
-          onBack = { route = Route.OpenCart },
-          onOpenCart = { route = Route.OpenCart },
-          onAmountChange = { amount ->
-            val index = openCartRows.indexOfFirst { it.id == currentRow.id }
-            if (index >= 0) {
-              openCartRows[index] = openCartRows[index].copy(customAmount = amount)
-            }
-          },
-        )
-      }
-    }
-
     Route.SavedDeals -> SavedDealsScreen(
       deals = savedDeals,
       onBack = { route = Route.Otc },
-      onOpenDashboard = { route = Route.AdminHome },
+      onOpenOtc = { route = Route.Otc },
       onClearCart = {
         openCartRows.clear()
         clientName = ""
@@ -261,6 +260,22 @@ private fun List<InventoryItem>.upsert(item: InventoryItem): List<InventoryItem>
   } else {
     this + item
   }
+}
+
+private fun List<CartProductItem>.mergeCartItems(additions: List<CartProductItem>): List<CartProductItem> {
+  if (additions.isEmpty()) return this
+  val merged = associateBy { it.id }.toMutableMap()
+  additions.forEach { addition ->
+    val existing = merged[addition.id]
+    merged[addition.id] = if (existing == null) {
+      addition
+    } else {
+      existing.copy(quantity = existing.quantity + addition.quantity)
+    }
+  }
+  val existingIds = map { it.id }.toSet()
+  val appended = additions.filter { it.id !in existingIds }
+  return map { item -> merged.getValue(item.id) } + appended
 }
 
 private fun generateTransactionCode(): String {

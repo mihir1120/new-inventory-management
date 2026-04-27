@@ -13,7 +13,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -121,6 +124,7 @@ import com.ashokvatika.ui.components.BrandButtonGlyph
 import com.ashokvatika.ui.components.BrandButtonIcon
 import com.ashokvatika.ui.components.BrandGreen
 import com.ashokvatika.ui.components.BrandOrange
+import com.ashokvatika.ui.components.NumericKeypad
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -139,6 +143,13 @@ private val TileShadow = Color(0x2C9EA4AA)
 private val SoftGreyShadow = Color(0x24969CA6)
 private val CardShape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
 private val UploadPill = Color(0x26FFFFFF)
+private val OtcHeaderActionSize = 54.dp
+private val OtcHeaderIconSize = 24.dp
+private val OtcCartIconSize = 31.2.dp
+private val LockedHeaderLogoTopOffset = (-24).dp
+private val LockedHeaderActionSize = 42.dp
+private val LockedHeaderIconSize = 24.dp
+private val LockedHeaderActionSpacing = 10.dp
 
 enum class DashboardDestination(
   val title: String,
@@ -1086,82 +1097,79 @@ fun InventoryListScreen(
     val brandMarkSize = if (maxWidth > 700.dp) 102.dp else 78.dp
     val inventoryTopSpace = if (maxHeight > 760.dp) 10.dp else 4.dp
 
-    Column(
+    LazyColumn(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .verticalScroll(rememberScrollState())
         .padding(horizontal = 16.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
       horizontalAlignment = Alignment.Start,
     ) {
-      Spacer(modifier = Modifier.height(inventoryTopSpace))
+      item { Spacer(modifier = Modifier.height(inventoryTopSpace)) }
 
-      InventoryListHeader(
-        textSize = brandTextSize,
-        markSize = brandMarkSize,
-        title = title,
-        itemCount = filteredItems.size,
-        onBack = onBack,
-      )
-
-      Spacer(modifier = Modifier.height(14.dp))
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        SearchInventoryField(
-          value = searchQuery,
-          onValueChange = { searchQuery = it },
-          fontFamily = dmSansThin,
-          modifier = Modifier.weight(1f),
-        )
-
-        AddInventoryButton(
-          fontFamily = dmSansThin,
-          onClick = onAddItem,
-          modifier = Modifier.weight(1f),
+      item {
+        InventoryListHeader(
+          textSize = brandTextSize,
+          markSize = brandMarkSize,
+          title = title,
+          itemCount = filteredItems.size,
+          onBack = onBack,
         )
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
-
-      if (filteredItems.isEmpty()) {
-        Surface(
+      item {
+        Row(
           modifier = Modifier.fillMaxWidth(),
-          shape = CardShape,
-          color = Color.White,
-          tonalElevation = 0.dp,
-          shadowElevation = 0.dp,
+          horizontalArrangement = Arrangement.spacedBy(16.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Text(
-            text = "No items added yet. Tap Add Item to create one.",
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
-            textAlign = TextAlign.Center,
-            color = Ink.copy(alpha = 0.62f),
-            style = TextStyle(
-              fontFamily = dmSansThin,
-              fontWeight = FontWeight.Thin,
-              fontSize = 20.sp,
-              lineHeight = 24.sp,
-            ),
+          SearchInventoryField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            fontFamily = dmSansThin,
+            modifier = Modifier.weight(1f),
+          )
+
+          AddInventoryButton(
+            fontFamily = dmSansThin,
+            onClick = onAddItem,
+            modifier = Modifier.weight(1f),
           )
         }
-      } else {
-        Column(
-          modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-          filteredItems.forEach { item ->
-            InventoryItemCard(
-              item = item,
-              fontFamily = dmSansThin,
-              onClick = { onItemTap(item) },
-              onRequestDelete = { pendingDeleteItem = it },
+      }
+
+      if (filteredItems.isEmpty()) {
+        item {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = CardShape,
+            color = Color.White,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+          ) {
+            Text(
+              text = "No items added yet. Tap Add Item to create one.",
+              modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
+              textAlign = TextAlign.Center,
+              color = Ink.copy(alpha = 0.62f),
+              style = TextStyle(
+                fontFamily = dmSansThin,
+                fontWeight = FontWeight.Thin,
+                fontSize = 20.sp,
+                lineHeight = 24.sp,
+              ),
             )
           }
+        }
+      } else {
+        items(filteredItems, key = { it.id }) { item ->
+          InventoryItemCard(
+            item = item,
+            fontFamily = dmSansThin,
+            onClick = { onItemTap(item) },
+            onRequestDelete = { pendingDeleteItem = it },
+          )
         }
       }
     }
@@ -1194,29 +1202,17 @@ private fun InventoryListHeader(
     modifier = Modifier.fillMaxWidth(),
     horizontalAlignment = Alignment.Start,
   ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.Top,
-    ) {
-      AshokvatikaLogo(
-        modifier = Modifier.widthIn(max = 260.dp),
-        textSize = textSize,
-        markSize = markSize,
-      )
-
-      CircleIconAction(
-        size = 44.dp,
-        icon = {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = Accent,
-          )
-        },
-        onClick = onBack,
-      )
-    }
+    TopBrandBar(
+      textSize = textSize,
+      markSize = markSize,
+      onBack = onBack,
+      alignStart = true,
+      logoMaxWidth = 260.dp,
+      actionButtonSize = LockedHeaderActionSize,
+      actionIconSize = LockedHeaderIconSize,
+      actionSpacing = LockedHeaderActionSpacing,
+      logoTopOffset = LockedHeaderLogoTopOffset,
+    )
 
     Spacer(modifier = Modifier.height(2.dp))
 
@@ -1251,34 +1247,43 @@ private fun TopBrandBar(
   markSize: Dp,
   onBack: () -> Unit,
   alignStart: Boolean = false,
+  logoMaxWidth: Dp = 360.dp,
+  actionButtonSize: Dp = 42.dp,
+  actionIconSize: Dp = 24.dp,
+  actionSpacing: Dp = 10.dp,
+  logoTopOffset: Dp = 0.dp,
+  actionBorderColor: Color = Color.Transparent,
+  actionBorderWidth: Dp = 0.dp,
   countBadge: @Composable (() -> Unit)? = null,
 ) {
-  Box(
-    modifier = Modifier.fillMaxWidth(),
-    contentAlignment = if (alignStart) Alignment.CenterStart else Alignment.Center,
-  ) {
-    AshokvatikaLogo(
-      modifier = if (alignStart) Modifier.widthIn(max = 360.dp) else Modifier.fillMaxWidth(0.7f),
-      textSize = textSize,
-      markSize = markSize,
-    )
-
-    Box(
-      modifier = Modifier
-        .align(Alignment.TopEnd)
-        .padding(top = 8.dp),
+  if (alignStart) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.Top,
     ) {
+      AshokvatikaLogo(
+        modifier = Modifier
+          .widthIn(max = logoMaxWidth)
+          .offset(y = logoTopOffset),
+        textSize = textSize,
+        markSize = markSize,
+      )
+
       Column(
         horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(actionSpacing),
       ) {
         CircleIconAction(
-          size = 42.dp,
+          size = actionButtonSize,
+          borderColor = actionBorderColor,
+          borderWidth = actionBorderWidth,
           icon = {
             Icon(
               imageVector = Icons.AutoMirrored.Filled.ArrowBack,
               contentDescription = "Back",
               tint = Accent,
+              modifier = Modifier.size(actionIconSize),
             )
           },
           onClick = onBack,
@@ -1286,7 +1291,63 @@ private fun TopBrandBar(
         countBadge?.invoke()
       }
     }
+  } else {
+    Box(
+      modifier = Modifier.fillMaxWidth(),
+      contentAlignment = Alignment.Center,
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(0.7f),
+        textSize = textSize,
+        markSize = markSize,
+      )
+
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(top = 8.dp),
+      ) {
+        Column(
+          horizontalAlignment = Alignment.End,
+          verticalArrangement = Arrangement.spacedBy(actionSpacing),
+        ) {
+          CircleIconAction(
+            size = actionButtonSize,
+            borderColor = actionBorderColor,
+            borderWidth = actionBorderWidth,
+            icon = {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Accent,
+                modifier = Modifier.size(actionIconSize),
+              )
+            },
+            onClick = onBack,
+          )
+          countBadge?.invoke()
+        }
+      }
+    }
   }
+}
+
+@Composable
+private fun ClosedDealsShortcutIcon() {
+  Image(
+    painter = painterResource(R.drawable.icon_closed_list),
+    contentDescription = null,
+    modifier = Modifier.size(OtcHeaderIconSize),
+  )
+}
+
+@Composable
+private fun ClosedPageOtcShortcutIcon() {
+  Image(
+    painter = painterResource(R.drawable.icon_closed_header_list),
+    contentDescription = null,
+    modifier = Modifier.size(OtcHeaderIconSize),
+  )
 }
 
 @Composable
@@ -1780,42 +1841,43 @@ fun OtcScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 32.dp, 980.dp)
-    val horizontalPadding = if (maxWidth > 700.dp) 24.dp else 16.dp
+    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
+    val horizontalPadding = 24.dp
     val amountSize = when {
-      maxWidth > 900.dp -> 58.sp
-      maxWidth > 600.dp -> 52.sp
-      else -> 44.sp
+      maxWidth > 1000.dp -> 81.sp
+      maxWidth > 700.dp -> 69.sp
+      else -> 54.sp
     }
     val mrpLabelSize = when {
-      maxWidth > 900.dp -> 14.5.sp
-      maxWidth > 600.dp -> 13.sp
-      else -> 11.sp
+      maxWidth > 1000.dp -> 14.sp
+      maxWidth > 700.dp -> 12.sp
+      else -> 10.sp
     }
-    val thumbnailSize = minOf((contentWidth - 40.dp) / 6f, if (maxWidth > 700.dp) 68.dp else 52.dp)
+    val thumbnailSize = minOf((contentWidth - 40.dp) / 6.4f, if (maxWidth > 700.dp) 64.dp else 48.dp)
     val carouselCardWidth = when {
-      maxWidth > 1000.dp -> 220.dp
-      maxWidth > 700.dp -> 184.dp
-      else -> minOf(contentWidth * 0.44f, 156.dp)
+      maxWidth > 1200.dp -> 190.dp
+      maxWidth > 900.dp -> 172.dp
+      maxWidth > 700.dp -> 152.dp
+      else -> minOf(contentWidth * 0.36f, 132.dp)
     }
     val carouselCardHeight = when {
-      maxHeight > 900.dp -> 190.dp
-      maxHeight > 760.dp -> 158.dp
-      else -> 132.dp
+      maxHeight > 900.dp -> 178.dp
+      maxHeight > 760.dp -> 148.dp
+      else -> 124.dp
     }
     val carouselPhotoSize = when {
-      maxHeight > 900.dp -> 104.dp
-      maxHeight > 760.dp -> 86.dp
-      else -> 70.dp
+      maxHeight > 900.dp -> 96.dp
+      maxHeight > 760.dp -> 80.dp
+      else -> 62.dp
     }
     val sectionGap = when {
-      maxHeight > 900.dp -> 14.dp
-      maxHeight > 720.dp -> 10.dp
-      else -> 7.dp
+      maxHeight > 900.dp -> 16.dp
+      maxHeight > 720.dp -> 12.dp
+      else -> 10.dp
     }
     val topBarTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
     val topBarMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
-    val otcTopSpace = if (maxHeight > 760.dp) 24.dp else 8.dp
+    val otcTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
 
     Column(
       modifier = Modifier
@@ -1824,7 +1886,7 @@ fun OtcScreen(
         .align(Alignment.TopCenter)
         .verticalScroll(rememberScrollState())
         .padding(horizontal = horizontalPadding, vertical = 16.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
+      horizontalAlignment = Alignment.Start,
     ) {
       Spacer(modifier = Modifier.height(otcTopSpace))
 
@@ -1833,13 +1895,22 @@ fun OtcScreen(
         markSize = topBarMarkSize,
         onBack = onBack,
         alignStart = true,
+        logoMaxWidth = 360.dp,
+        actionButtonSize = OtcHeaderActionSize,
+        actionIconSize = OtcHeaderIconSize,
+        actionSpacing = 12.dp,
+        logoTopOffset = LockedHeaderLogoTopOffset,
+        actionBorderColor = Accent,
+        actionBorderWidth = 2.dp,
         countBadge = {
           Column(
             horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             CircleIconAction(
-              size = 42.dp,
+              size = OtcHeaderActionSize,
+              borderColor = Accent,
+              borderWidth = 2.dp,
               icon = {
                 if (cartCount > 0) {
                   Text(
@@ -1848,27 +1919,30 @@ fun OtcScreen(
                     style = TextStyle(
                       fontFamily = dmSansThin,
                       fontWeight = FontWeight.Normal,
-                      fontSize = 18.sp,
+                      fontSize = 20.sp,
                     ),
                   )
                 } else {
-                  Icon(
-                    imageVector = Icons.Filled.ShoppingCart,
-                    contentDescription = "Open cart",
-                    tint = Accent,
-                  )
+                  Box(
+                    modifier = Modifier.size(OtcCartIconSize),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Image(
+                      painter = painterResource(R.drawable.wheelbarrow),
+                      contentDescription = "Open cart",
+                      modifier = Modifier.size(OtcCartIconSize),
+                    )
+                  }
                 }
               },
               onClick = onOpenCart,
             )
             CircleIconAction(
-              size = 42.dp,
+              size = OtcHeaderActionSize,
+              borderColor = Accent,
+              borderWidth = 2.dp,
               icon = {
-                Icon(
-                  imageVector = Icons.Filled.GridView,
-                  contentDescription = "Open saved deals",
-                  tint = Accent,
-                )
+                ClosedDealsShortcutIcon()
               },
               onClick = onOpenSavedDeals,
             )
@@ -1876,7 +1950,7 @@ fun OtcScreen(
         },
       )
 
-      Spacer(modifier = Modifier.height(18.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
       MrpEditor(
         totalAmount = totalAmount,
@@ -1988,6 +2062,7 @@ fun OtcScreen(
         photoSize = carouselPhotoSize,
       )
     }
+
   }
 }
 
@@ -2012,16 +2087,6 @@ private fun MrpEditor(
       horizontalAlignment = if (leftAligned) Alignment.Start else Alignment.CenterHorizontally,
     ) {
       Text(
-        text = "MRP",
-        color = Ink,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = labelSize,
-          lineHeight = labelSize,
-        ),
-      )
-      Text(
         text = "₹ ${formatAmount(totalAmount)}",
         color = Ink,
         textAlign = if (leftAligned) TextAlign.Start else TextAlign.Center,
@@ -2033,8 +2098,8 @@ private fun MrpEditor(
         ),
       )
       Text(
-        text = "Landing cost ₹ ${formatAmount(landingTotal)}",
-        color = Accent,
+        text = "₹ ${formatAmount(landingTotal)}",
+        color = Color(0xFFB8B8B8),
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Normal,
@@ -2044,35 +2109,14 @@ private fun MrpEditor(
       )
     }
 
-    Surface(
-      modifier = Modifier.clickable(enabled = addEnabled, onClick = onAddToCart),
-      shape = CardShape,
-      color = if (addEnabled) Accent else Accent.copy(alpha = 0.38f),
-      tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
-    ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Icon(
-          imageVector = Icons.Filled.Add,
-          contentDescription = "Add to Cart",
-          tint = Color.White,
-          modifier = Modifier.size(20.dp),
-        )
-        Text(
-          text = "Add to Cart",
-          color = Color.White,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 18.sp,
-          ),
-        )
-      }
-    }
+    Image(
+      painter = painterResource(R.drawable.plus_button),
+      contentDescription = "Add to Cart",
+      modifier = Modifier
+        .size(OtcHeaderActionSize)
+        .alpha(if (addEnabled) 1f else 0.4f)
+        .clickable(enabled = addEnabled, onClick = onAddToCart),
+    )
   }
 }
 
@@ -2088,6 +2132,8 @@ private fun OtcQuantityPopup(
   fontFamily: FontFamily,
   imageSize: Dp,
 ) {
+  var showQuantityKeypad by remember(item.id) { mutableStateOf(false) }
+
   Surface(
     modifier = Modifier
       .fillMaxWidth()
@@ -2102,134 +2148,155 @@ private fun OtcQuantityPopup(
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
-    Row(
+    Column(
       modifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = 12.dp, vertical = 10.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
+      verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-      Box(
-        modifier = Modifier
-          .size(imageSize)
-          .background(Accent, CircleShape)
-          .clip(CircleShape),
-        contentAlignment = Alignment.Center,
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          text = item.shortName,
-          color = Color.White,
-          textAlign = TextAlign.Center,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Thin,
-            fontSize = minOf(imageSize.value * 0.22f, 24f).sp,
-            lineHeight = minOf(imageSize.value * 0.25f, 28f).sp,
-          ),
-        )
-      }
-
-      Column(
-        modifier = Modifier
-          .weight(1f)
-          .padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-      ) {
-        Text(
-          text = item.name,
-          color = Ink,
-          maxLines = 1,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 24.sp,
-            lineHeight = 26.sp,
-          ),
-        )
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceEvenly,
+        Box(
+          modifier = Modifier
+            .size(imageSize)
+            .background(Accent, CircleShape)
+            .clip(CircleShape),
+          contentAlignment = Alignment.Center,
         ) {
+          Text(
+            text = item.shortName,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Thin,
+              fontSize = minOf(imageSize.value * 0.22f, 24f).sp,
+              lineHeight = minOf(imageSize.value * 0.25f, 28f).sp,
+            ),
+          )
+        }
+
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .padding(horizontal = 12.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Text(
+            text = item.name,
+            color = Ink,
+            maxLines = 1,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = 24.sp,
+              lineHeight = 26.sp,
+            ),
+          )
+
           Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
           ) {
-            QuantityButton("-", onDecrease, fontFamily)
-            BasicTextField(
-              value = quantity,
-              onValueChange = onQuantityChange,
-              modifier = Modifier.width(44.dp),
-              singleLine = true,
-              textStyle = TextStyle(
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.Thin,
-                fontSize = 28.sp,
-                lineHeight = 30.sp,
-                textAlign = TextAlign.Center,
+            Box(
+              modifier = Modifier
+                .width(86.dp)
+                .height(58.dp)
+                .background(Color(0xFFF7F7F7), CardShape)
+                .border(1.dp, Accent.copy(alpha = 0.24f), CardShape)
+                .clickable { showQuantityKeypad = true },
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = quantity,
                 color = Ink,
-              ),
-              cursorBrush = SolidColor(Accent),
-              keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-            )
-            QuantityButton("+", onIncrease, fontFamily)
-          }
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Thin,
+                  fontSize = 30.sp,
+                  lineHeight = 32.sp,
+                ),
+              )
+            }
 
-          Column(
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-          ) {
-            Text(
-              text = "Landing ₹ ${item.landingPrice}",
-              color = Accent,
-              style = TextStyle(
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 18.sp,
-                lineHeight = 20.sp,
-              ),
-            )
-            Text(
-              text = "MRP ₹ ${item.price}",
-              color = Ink.copy(alpha = 0.72f),
-              style = TextStyle(
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.Thin,
-                fontSize = 18.sp,
-                lineHeight = 20.sp,
-              ),
-            )
-          }
-
-          Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-          ) {
-            CircleIconAction(
-              size = 42.dp,
-              icon = {
-                Icon(
-                  imageVector = Icons.Filled.Close,
-                  contentDescription = "Close",
-                  tint = Accent,
-                )
-              },
-              onClick = onClose,
-            )
-            CircleIconAction(
-              size = 42.dp,
-              icon = {
-                Icon(
-                  imageVector = Icons.Filled.Check,
-                  contentDescription = "Confirm quantity",
-                  tint = Color(0xFF31A853),
-                )
-              },
-              onClick = onConfirm,
-            )
+            Column(
+              verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              Text(
+                text = "\u20B9 " + item.price,
+                color = Ink,
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Thin,
+                  fontSize = 54.sp,
+                  lineHeight = 58.sp,
+                ),
+              )
+              Text(
+                text = "\u20B9 " + item.landingPrice,
+                color = Color(0xFFB8B8B8),
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 18.sp,
+                  lineHeight = 20.sp,
+                ),
+              )
+            }
           }
         }
+
+        Column(
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          CircleIconAction(
+            size = 42.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close",
+                tint = Accent,
+              )
+            },
+            onClick = onClose,
+          )
+          CircleIconAction(
+            size = 42.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "Confirm quantity",
+                tint = Color(0xFF31A853),
+              )
+            },
+            onClick = {
+              showQuantityKeypad = false
+              onConfirm()
+            },
+          )
+        }
+      }
+
+      if (showQuantityKeypad) {
+        NumericKeypad(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape),
+          onDigit = { digit ->
+            val currentValue = quantity.takeIf { it != "0" }.orEmpty()
+            onQuantityChange((currentValue + digit.toString()).take(2).ifBlank { "0" })
+          },
+          onBackspace = {
+            onQuantityChange(quantity.dropLast(1).ifBlank { "0" })
+          },
+          onConfirm = { showQuantityKeypad = false },
+        )
       }
     }
   }
@@ -2322,7 +2389,7 @@ private fun OtcCarouselSection(
 ) {
   Column(
     modifier = Modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy(4.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
       text = title,
@@ -2340,7 +2407,7 @@ private fun OtcCarouselSection(
       modifier = Modifier
         .fillMaxWidth()
         .horizontalScroll(rememberScrollState()),
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      horizontalArrangement = Arrangement.spacedBy(20.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       items.forEach { item ->
@@ -2354,6 +2421,7 @@ private fun OtcCarouselSection(
           photoSize = photoSize,
         )
       }
+      Spacer(modifier = Modifier.width(24.dp))
     }
   }
 }
@@ -2453,7 +2521,8 @@ fun OpenCartScreen(
   onTransactionCodeChange: (String) -> Unit,
   onBack: () -> Unit,
   onOpenSavedDeals: () -> Unit,
-  onEditRow: (String) -> Unit,
+  onAddItemsToRow: (String, List<CartProductItem>) -> Unit,
+  onUpdateRowAmount: (String, Int) -> Unit,
   onUpdateRowTitle: (String, String) -> Unit,
   onUpdateItemQuantity: (String, String, Int) -> Unit,
   onDeleteItem: (String, String) -> Unit,
@@ -2463,6 +2532,8 @@ fun OpenCartScreen(
 ) {
   val fontFamily = rememberDashboardFont()
   var activeEditor by remember { mutableStateOf<Pair<String, CartProductItem>?>(null) }
+  var rowItemPickerId by remember { mutableStateOf<String?>(null) }
+  var rowCheckoutId by remember { mutableStateOf<String?>(null) }
   var pendingDeleteRowId by remember { mutableStateOf<String?>(null) }
   var showClearCartConfirm by remember { mutableStateOf(false) }
   var showPaymentGateway by remember { mutableStateOf(false) }
@@ -2474,18 +2545,22 @@ fun OpenCartScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 32.dp, 980.dp)
-    val brandTextSize = if (maxWidth > 700.dp) 42.sp else 34.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 92.dp else 74.dp
+    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
+    val brandTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
+    val brandMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
+    val openCartTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
 
     Column(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .padding(horizontal = 16.dp, vertical = 14.dp),
+        .padding(horizontal = 24.dp, vertical = 16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
+      horizontalAlignment = Alignment.Start,
     ) {
+      Spacer(modifier = Modifier.height(openCartTopSpace))
+
       OpenCartHeader(
         textSize = brandTextSize,
         markSize = brandMarkSize,
@@ -2552,33 +2627,61 @@ fun OpenCartScreen(
         )
       }
 
-      Column(
+      LazyColumn(
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f)
-          .verticalScroll(rememberScrollState()),
+          .fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
         if (rows.isEmpty()) {
-          EmptyStateCard(
-            text = "No items in open cart yet. Add selections from OTC to create a product row.",
-            fontFamily = fontFamily,
-          )
+          item {
+            EmptyStateCard(
+              text = "No items in open cart yet. Add selections from OTC to create a product row.",
+              fontFamily = fontFamily,
+            )
+          }
         } else {
-          rows.forEach { row ->
+          items(rows, key = { it.id }) { row ->
             OpenCartDealRow(
               row = row,
               clientName = clientName,
               transactionCode = transactionCode,
               fontFamily = fontFamily,
-              onEdit = { onEditRow(row.id) },
-              onTitleChange = { onUpdateRowTitle(row.id, it) },
+              onEdit = { rowItemPickerId = row.id },
+              onCalculator = { rowCheckoutId = row.id },
               onItemTap = { item -> activeEditor = row.id to item },
               onLongPress = { pendingDeleteRowId = row.id },
             )
           }
         }
       }
+    }
+
+    val rowItemPicker = rowItemPickerId?.let { rowId -> rows.firstOrNull { it.id == rowId }?.let { rowId to it } }
+    if (rowItemPicker != null) {
+      OpenCartRowItemPickerDialog(
+        rowTitle = rowItemPicker.second.title,
+        fontFamily = fontFamily,
+        onDismiss = { rowItemPickerId = null },
+        onAddItems = { items ->
+          onAddItemsToRow(rowItemPicker.first, items)
+          rowItemPickerId = null
+        },
+      )
+    }
+
+    val rowCheckout = rowCheckoutId?.let { rowId -> rows.firstOrNull { it.id == rowId }?.let { rowId to it } }
+    if (rowCheckout != null) {
+      CheckoutAdjustmentsDialog(
+        row = rowCheckout.second,
+        fontFamily = fontFamily,
+        onDismiss = { rowCheckoutId = null },
+        onApply = { amount ->
+          onUpdateRowAmount(rowCheckout.first, amount)
+          rowCheckoutId = null
+        },
+      )
     }
 
     val editor = activeEditor
@@ -2644,7 +2747,7 @@ fun OpenCartScreen(
 fun SavedDealsScreen(
   deals: List<SavedDeal>,
   onBack: () -> Unit,
-  onOpenDashboard: () -> Unit,
+  onOpenOtc: () -> Unit,
   onClearCart: () -> Unit,
   onUpdateDealInfo: (String, String, String, String, String) -> Unit,
 ) {
@@ -2677,49 +2780,61 @@ fun SavedDealsScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 32.dp, 980.dp)
-    val brandTextSize = if (maxWidth > 700.dp) 42.sp else 34.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 92.dp else 74.dp
+    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
+    val brandTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
+    val brandMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
+    val closedTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
 
-    Column(
+    LazyColumn(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 16.dp, vertical = 14.dp),
+        .padding(horizontal = 24.dp, vertical = 16.dp),
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-      SavedDealsHeader(
-        textSize = brandTextSize,
-        markSize = brandMarkSize,
-        onBack = onBack,
-        onOpenDashboard = onOpenDashboard,
-      )
+      item {
+        Spacer(modifier = Modifier.height(closedTopSpace))
+      }
 
-      Text(
-        text = "Closed",
-        color = AccentGreen,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 28.sp,
-        ),
-      )
+      item {
+        SavedDealsHeader(
+          textSize = brandTextSize,
+          markSize = brandMarkSize,
+          onBack = onBack,
+          onOpenOtc = onOpenOtc,
+        )
+      }
 
-      SearchInventoryField(
-        value = searchQuery,
-        onValueChange = { searchQuery = it },
-        fontFamily = fontFamily,
-      )
+      item {
+        Text(
+          text = "Closed",
+          color = AccentGreen,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 28.sp,
+          ),
+        )
+      }
 
-      if (filteredDeals.isEmpty()) {
-        EmptyStateCard(
-          text = if (deals.isEmpty()) "No deals saved yet. Save a deal from Open Cart to keep a record here." else "No closed deals match this filter.",
+      item {
+        SearchInventoryField(
+          value = searchQuery,
+          onValueChange = { searchQuery = it },
           fontFamily = fontFamily,
         )
+      }
+
+      if (filteredDeals.isEmpty()) {
+        item {
+          EmptyStateCard(
+            text = if (deals.isEmpty()) "No deals saved yet. Save a deal from Open Cart to keep a record here." else "No closed deals match this filter.",
+            fontFamily = fontFamily,
+          )
+        }
       } else {
-        filteredDeals.forEach { deal ->
+        items(filteredDeals, key = { it.id }) { deal ->
           SavedDealCard(
             deal = deal,
             fontFamily = fontFamily,
@@ -2739,44 +2854,249 @@ private fun OpenCartHeader(
   onBack: () -> Unit,
   onOpenSavedDeals: () -> Unit,
 ) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.Top,
-  ) {
-    AshokvatikaLogo(
-      modifier = Modifier.widthIn(max = 260.dp),
-      textSize = textSize,
-      markSize = markSize,
-    )
-
-    Column(
-      horizontalAlignment = Alignment.End,
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+  TopBrandBar(
+    textSize = textSize,
+    markSize = markSize,
+    onBack = onBack,
+    alignStart = true,
+    logoMaxWidth = 360.dp,
+    actionButtonSize = OtcHeaderActionSize,
+    actionIconSize = OtcHeaderIconSize,
+    actionSpacing = 12.dp,
+    logoTopOffset = LockedHeaderLogoTopOffset,
+    actionBorderColor = Accent,
+    actionBorderWidth = 2.dp,
+    countBadge = {
       CircleIconAction(
-        size = 42.dp,
+        size = OtcHeaderActionSize,
+        borderColor = Accent,
+        borderWidth = 2.dp,
         icon = {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = Accent,
-          )
-        },
-        onClick = onBack,
-      )
-
-      CircleIconAction(
-        size = 42.dp,
-        icon = {
-          Icon(
-            imageVector = Icons.Filled.GridView,
-            contentDescription = "Open saved deals",
-            tint = Accent,
-          )
+          ClosedDealsShortcutIcon()
         },
         onClick = onOpenSavedDeals,
       )
+    },
+  )
+}
+
+@Composable
+private fun OpenCartRowItemPickerDialog(
+  rowTitle: String,
+  fontFamily: FontFamily,
+  onDismiss: () -> Unit,
+  onAddItems: (List<CartProductItem>) -> Unit,
+) {
+  val catalog = remember { otcCatalog() }
+  var activeItemId by remember { mutableStateOf<String?>(null) }
+  var draftQuantity by remember { mutableStateOf("1") }
+  val quantities = remember { mutableStateMapOf<String, Int>() }
+  val activeItem = catalog.firstOrNull { it.id == activeItemId }
+  val selectedIds = quantities.keys.toSet()
+  val selectedItems = catalog.filter { it.id in selectedIds }
+  val selectedCartItems = selectedItems.mapNotNull { item ->
+    val quantity = quantities[item.id] ?: return@mapNotNull null
+    CartProductItem(
+      id = item.id,
+      name = item.name,
+      shortName = item.shortName,
+      mrp = item.price.toIntOrNull() ?: 0,
+      landingPrice = item.landingPrice.toIntOrNull() ?: 0,
+      quantity = quantity,
+    )
+  }
+  val totalAmount = selectedCartItems.sumOf { it.mrp * it.quantity }
+  val landingTotal = selectedCartItems.sumOf { it.landingPrice * it.quantity }
+
+  Dialog(onDismissRequest = onDismiss) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(0.96f),
+      shape = CardShape,
+      color = Bg,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      BoxWithConstraints(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 18.dp, vertical = 16.dp),
+      ) {
+        val cardWidth = when {
+          maxWidth > 900.dp -> 172.dp
+          maxWidth > 700.dp -> 152.dp
+          else -> minOf(maxWidth * 0.48f, 148.dp)
+        }
+        val cardHeight = if (maxHeight > 760.dp) 148.dp else 124.dp
+        val photoSize = if (maxHeight > 760.dp) 80.dp else 62.dp
+        val amountSize = if (maxWidth > 700.dp) 32.sp else 28.sp
+
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 760.dp)
+            .verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(
+                text = if (rowTitle.isBlank()) "Edit product" else rowTitle,
+                color = Ink,
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 24.sp,
+                  lineHeight = 26.sp,
+                ),
+              )
+              Text(
+                text = "Add last-minute items",
+                color = Accent,
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 14.sp,
+                ),
+              )
+            }
+
+            CircleIconAction(
+              size = OtcHeaderActionSize,
+              borderColor = Accent,
+              borderWidth = 2.dp,
+              icon = {
+                Icon(
+                  imageVector = Icons.Filled.Close,
+                  contentDescription = "Close item picker",
+                  tint = Accent,
+                  modifier = Modifier.size(OtcHeaderIconSize),
+                )
+              },
+              onClick = onDismiss,
+            )
+          }
+
+          MrpEditor(
+            totalAmount = totalAmount,
+            landingTotal = landingTotal,
+            fontFamily = fontFamily,
+            labelSize = 10.sp,
+            amountSize = amountSize,
+            onAddToCart = {
+              if (selectedCartItems.isNotEmpty()) {
+                onAddItems(selectedCartItems)
+              }
+            },
+            addEnabled = selectedCartItems.isNotEmpty(),
+            leftAligned = true,
+          )
+
+          if (selectedItems.isNotEmpty()) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              repeat(maxOf(6, selectedItems.size)) { index ->
+                OtcSelectionThumbnail(
+                  item = selectedItems.getOrNull(index),
+                  size = 56.dp,
+                  fontFamily = fontFamily,
+                  onDelete = { tapped ->
+                    quantities.remove(tapped.id)
+                    if (activeItemId == tapped.id) {
+                      activeItemId = null
+                      draftQuantity = "1"
+                    }
+                  },
+                )
+              }
+            }
+          }
+
+          activeItem?.let { item ->
+            OtcQuantityPopup(
+              item = item,
+              quantity = draftQuantity,
+              onQuantityChange = { updated ->
+                val sanitized = updated.filter(Char::isDigit).take(2)
+                draftQuantity = sanitized.ifBlank { "0" }
+              },
+              onDecrease = {
+                val current = draftQuantity.toIntOrNull() ?: 0
+                draftQuantity = (current - 1).coerceAtLeast(0).toString()
+              },
+              onIncrease = {
+                val current = draftQuantity.toIntOrNull() ?: 0
+                draftQuantity = (current + 1).coerceAtMost(99).toString()
+              },
+              onConfirm = {
+                val quantity = draftQuantity.toIntOrNull() ?: 0
+                if (quantity <= 0) {
+                  quantities.remove(item.id)
+                } else {
+                  quantities[item.id] = quantity
+                }
+                activeItemId = null
+                draftQuantity = "1"
+              },
+              onClose = {
+                activeItemId = null
+                draftQuantity = "1"
+              },
+              fontFamily = fontFamily,
+              imageSize = 74.dp,
+            )
+          }
+
+          OtcCarouselSection(
+            title = "Plants",
+            items = catalog.filter { it.category == OtcCarouselCategory.Plant },
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = fontFamily,
+            cardWidth = cardWidth,
+            cardHeight = cardHeight,
+            photoSize = photoSize,
+          )
+
+          OtcCarouselSection(
+            title = "Pots",
+            items = catalog.filter { it.category == OtcCarouselCategory.Pots },
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = fontFamily,
+            cardWidth = cardWidth,
+            cardHeight = cardHeight,
+            photoSize = photoSize,
+          )
+
+          OtcCarouselSection(
+            title = "Supplies",
+            items = catalog.filter { it.category == OtcCarouselCategory.Supplies },
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = fontFamily,
+            cardWidth = cardWidth,
+            cardHeight = cardHeight,
+            photoSize = photoSize,
+          )
+        }
+      }
     }
   }
 }
@@ -2786,48 +3106,32 @@ private fun SavedDealsHeader(
   textSize: androidx.compose.ui.unit.TextUnit,
   markSize: Dp,
   onBack: () -> Unit,
-  onOpenDashboard: () -> Unit,
+  onOpenOtc: () -> Unit,
 ) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.Top,
-  ) {
-    AshokvatikaLogo(
-      modifier = Modifier.widthIn(max = 260.dp),
-      textSize = textSize,
-      markSize = markSize,
-    )
-
-    Column(
-      horizontalAlignment = Alignment.End,
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+  TopBrandBar(
+    textSize = textSize,
+    markSize = markSize,
+    onBack = onBack,
+    alignStart = true,
+    logoMaxWidth = 360.dp,
+    actionButtonSize = OtcHeaderActionSize,
+    actionIconSize = OtcHeaderIconSize,
+    actionSpacing = 12.dp,
+    logoTopOffset = LockedHeaderLogoTopOffset,
+    actionBorderColor = Accent,
+    actionBorderWidth = 2.dp,
+    countBadge = {
       CircleIconAction(
-        size = 42.dp,
+        size = OtcHeaderActionSize,
+        borderColor = Accent,
+        borderWidth = 2.dp,
         icon = {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = Accent,
-          )
+          ClosedPageOtcShortcutIcon()
         },
-        onClick = onBack,
+        onClick = onOpenOtc,
       )
-
-      CircleIconAction(
-        size = 42.dp,
-        icon = {
-          Icon(
-            imageVector = Icons.Filled.GridView,
-            contentDescription = "Dashboard",
-            tint = Accent,
-          )
-        },
-        onClick = onOpenDashboard,
-      )
-    }
-  }
+    },
+  )
 }
 
 @Composable
@@ -3129,7 +3433,7 @@ private fun OpenCartDealRow(
   transactionCode: String,
   fontFamily: FontFamily,
   onEdit: () -> Unit,
-  onTitleChange: (String) -> Unit,
+  onCalculator: () -> Unit,
   onItemTap: (CartProductItem) -> Unit,
   onLongPress: () -> Unit,
 ) {
@@ -3155,62 +3459,89 @@ private fun OpenCartDealRow(
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
-    var clearOnFirstFocus by remember(row.id) { mutableStateOf(true) }
     Column(
       modifier = Modifier.padding(14.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      BasicTextField(
-        value = linkedTitle,
-        onValueChange = onTitleChange,
-        modifier = Modifier.onFocusChanged {
-          if (it.isFocused && clearOnFirstFocus) {
-            onTitleChange("")
-            clearOnFirstFocus = false
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Text(
+            text = linkedTitle.ifBlank { if (clientName.isNotBlank()) clientName else "Product title" },
+            color = Ink,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = 22.sp,
+            ),
+          )
+          if (transactionCode.isNotBlank()) {
+            Text(
+              text = transactionCode,
+              color = Accent.copy(alpha = 0.82f),
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = 13.sp,
+              ),
+            )
           }
-        },
-        singleLine = true,
-        cursorBrush = SolidColor(Accent),
-        textStyle = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 22.sp,
-          color = Ink,
-        ),
-        decorationBox = { innerTextField ->
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        }
+
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Surface(
+            modifier = Modifier.clickable(onClick = onEdit),
+            shape = CardShape,
+            color = Accent.copy(alpha = 0.08f),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, Accent.copy(alpha = 0.28f)),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
           ) {
-            Box(modifier = Modifier.weight(1f)) {
-              if (linkedTitle.isBlank()) {
-                Text(
-                  text = if (clientName.isNotBlank()) clientName else "Product title",
-                  color = Ink.copy(alpha = 0.34f),
-                  style = TextStyle(
-                    fontFamily = fontFamily,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 22.sp,
-                  ),
-                )
-              }
-              innerTextField()
-            }
-            if (transactionCode.isNotBlank()) {
+            Box(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+              contentAlignment = Alignment.Center,
+            ) {
               Text(
-                text = transactionCode,
-                color = Accent.copy(alpha = 0.82f),
+                text = "+/-",
+                color = Accent,
                 style = TextStyle(
                   fontFamily = fontFamily,
                   fontWeight = FontWeight.Normal,
-                  fontSize = 13.sp,
+                  fontSize = 14.sp,
                 ),
               )
             }
           }
-        },
-      )
+          Surface(
+            modifier = Modifier.clickable(onClick = onCalculator),
+            shape = CardShape,
+            color = Accent.copy(alpha = 0.08f),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, Accent.copy(alpha = 0.28f)),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+          ) {
+            Box(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              Image(
+                painter = painterResource(R.drawable.icon_calculator_money),
+                contentDescription = "Open checkout calculator",
+                modifier = Modifier.size(28.dp),
+              )
+            }
+          }
+        }
+      }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -3221,7 +3552,6 @@ private fun OpenCartDealRow(
           amount = row.displayAmount(),
           fontFamily = fontFamily,
           modifier = Modifier.width(128.dp),
-          onEdit = onEdit,
         )
 
         Row(
@@ -3248,10 +3578,6 @@ private fun DealAmountSection(
   amount: Int,
   fontFamily: FontFamily,
   modifier: Modifier = Modifier,
-  onEdit: () -> Unit = {},
-  actionLabel: String = "Edit",
-  useCartIcon: Boolean = false,
-  showActionLabel: Boolean = true,
 ) {
   Surface(
     modifier = modifier,
@@ -3262,50 +3588,291 @@ private fun DealAmountSection(
   ) {
     Column(
       modifier = Modifier.padding(horizontal = 14.dp, vertical = 18.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Text(
-        text = "Amount :",
-        color = Accent,
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
-      )
       Text(
         text = "₹ ${formatAmount(amount)}",
         color = Ink,
         style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp, lineHeight = 26.sp),
       )
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    }
+  }
+}
+
+@Composable
+private fun CheckoutAdjustmentsDialog(
+  row: OpenCartRow,
+  fontFamily: FontFamily,
+  onDismiss: () -> Unit,
+  onApply: (Int) -> Unit,
+) {
+  var quantity by remember(row.id, row.customAmount) { mutableStateOf("1") }
+  var discount by remember(row.id, row.customAmount) { mutableStateOf("0") }
+  var discountPercent by remember(row.id, row.customAmount) { mutableStateOf("0") }
+  var activeField by remember(row.id) { mutableStateOf<CheckoutPopupField?>(null) }
+  var discountMode by remember(row.id) { mutableStateOf(CheckoutPopupField.Discount) }
+
+  val baseAmount = row.baseAmount().toDouble()
+  val baseLanding = row.items.sumOf { it.landingPrice * it.quantity }.toDouble()
+  val quantityValue = parseDecimalInput(quantity).coerceAtLeast(0.0)
+  val priceTotal = baseAmount * quantityValue
+  val landingTotal = baseLanding * quantityValue
+  val discountValue = parseDecimalInput(discount)
+  val discountPercentValue = parseDecimalInput(discountPercent)
+
+  LaunchedEffect(quantityValue, discount, discountMode, activeField, priceTotal) {
+    if (discountMode == CheckoutPopupField.Discount && activeField != CheckoutPopupField.Percent) {
+      val nextPercent = if (priceTotal == 0.0) 0.0 else (discountValue / priceTotal) * 100.0
+      val formatted = formatEditableDecimal(nextPercent)
+      if (discountPercent != formatted) {
+        discountPercent = formatted
+      }
+    }
+  }
+
+  LaunchedEffect(quantityValue, discountPercent, discountMode, activeField, priceTotal) {
+    if (discountMode == CheckoutPopupField.Percent && activeField != CheckoutPopupField.Discount) {
+      val nextDiscount = (priceTotal * discountPercentValue) / 100.0
+      val formatted = formatEditableDecimal(nextDiscount)
+      if (discount != formatted) {
+        discount = formatted
+      }
+    }
+  }
+
+  val appliedDiscount = if (discountMode == CheckoutPopupField.Percent) {
+    (priceTotal * discountPercentValue) / 100.0
+  } else {
+    discountValue
+  }
+  val finalAmount = (priceTotal - appliedDiscount).coerceAtLeast(0.0)
+  val profitLoss = finalAmount - landingTotal
+  val mrpPerUnit = if (quantityValue > 0.0) priceTotal / quantityValue else 0.0
+
+  fun activateField(field: CheckoutPopupField) {
+    activeField = field
+    when (field) {
+      CheckoutPopupField.Quantity -> quantity = ""
+      CheckoutPopupField.Discount -> {
+        discountMode = CheckoutPopupField.Discount
+        discount = ""
+      }
+      CheckoutPopupField.Percent -> {
+        discountMode = CheckoutPopupField.Percent
+        discountPercent = ""
+      }
+    }
+  }
+
+  fun updateActiveField(transform: (String) -> String) {
+    when (activeField) {
+      CheckoutPopupField.Quantity -> quantity = transform(quantity)
+      CheckoutPopupField.Discount -> {
+        discountMode = CheckoutPopupField.Discount
+        discount = transform(discount)
+      }
+      CheckoutPopupField.Percent -> {
+        discountMode = CheckoutPopupField.Percent
+        discountPercent = transform(discountPercent)
+      }
+      null -> Unit
+    }
+  }
+
+  Dialog(onDismissRequest = onDismiss) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(0.94f),
+      shape = CardShape,
+      color = Bg,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier
+          .padding(horizontal = 18.dp, vertical = 18.dp)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
-        if (showActionLabel) {
-          Text(
-            text = actionLabel,
-            color = Accent,
-            style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
-          )
-        } else {
-          Spacer(modifier = Modifier.width(1.dp))
-        }
-        CircleIconAction(
-          size = 34.dp,
-          icon = {
-            if (useCartIcon) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = row.title.ifBlank { "Checkout" },
+              color = AccentGreen,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
+            )
+            Text(
+              text = "Adjust this info container amount",
+              color = Accent,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
+            )
+          }
+          CircleIconAction(
+            size = 42.dp,
+            icon = {
               Icon(
-                imageVector = Icons.Filled.ShoppingCart,
-                contentDescription = actionLabel,
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close checkout popup",
                 tint = Accent,
               )
+            },
+            onClick = onDismiss,
+          )
+        }
+
+        CheckoutGrid(
+          finalPrice = finalAmount,
+          beforeMarkup = priceTotal,
+          landingPrice = landingTotal,
+          quantityValue = quantityValue,
+          discountedUnitPrice = mrpPerUnit,
+          discountTotal = appliedDiscount,
+          priceTotal = finalAmount,
+          profitLoss = profitLoss,
+          discountPercent = if (priceTotal == 0.0) 0.0 else (appliedDiscount / priceTotal) * 100.0,
+          fontFamily = fontFamily,
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          CheckoutPopupValueButton(
+            label = "Q",
+            value = quantity,
+            fontFamily = fontFamily,
+            modifier = Modifier.weight(1f),
+            active = activeField == CheckoutPopupField.Quantity,
+            onClick = { activateField(CheckoutPopupField.Quantity) },
+          )
+          CheckoutPopupValueButton(
+            label = "D",
+            value = discount,
+            fontFamily = fontFamily,
+            modifier = Modifier.weight(1f),
+            prefix = "\u20B9",
+            active = activeField == CheckoutPopupField.Discount,
+            onClick = { activateField(CheckoutPopupField.Discount) },
+          )
+          CheckoutPopupValueButton(
+            label = "%",
+            value = discountPercent,
+            fontFamily = fontFamily,
+            modifier = Modifier.weight(1f),
+            suffix = "%",
+            active = activeField == CheckoutPopupField.Percent,
+            onClick = { activateField(CheckoutPopupField.Percent) },
+          )
+        }
+
+        if (activeField != null) {
+          NumericKeypad(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(CardShape),
+            onDigit = { digit ->
+              updateActiveField { current ->
+                sanitizeDecimalEntry(current + digit.toString(), allowNegative = activeField != CheckoutPopupField.Quantity)
+              }
+            },
+            onDecimal = {
+              updateActiveField { current ->
+                sanitizeDecimalEntry(
+                  if (current.isBlank() || current == "-") "${current}0." else "$current.",
+                  allowNegative = activeField != CheckoutPopupField.Quantity,
+                )
+              }
+            },
+            onSignToggle = if (activeField == CheckoutPopupField.Discount || activeField == CheckoutPopupField.Percent) {
+              {
+                updateActiveField { current ->
+                  if (current.startsWith("-")) current.removePrefix("-") else "-$current"
+                }
+              }
             } else {
-              Text(
-                text = "+/-",
-                color = Accent,
-                style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 11.sp),
-              )
-            }
-          },
-          onClick = onEdit,
+              null
+            },
+            onBackspace = {
+              updateActiveField { current ->
+                current.dropLast(1)
+              }
+            },
+            onConfirm = { activeField = null },
+          )
+        }
+
+        ActionButtonCard(
+          title = "Apply Amount",
+          color = AccentGreen,
+          fontFamily = fontFamily,
+          onClick = { onApply(finalAmount.toInt()) },
+        )
+      }
+    }
+  }
+}
+
+private enum class CheckoutPopupField {
+  Quantity,
+  Discount,
+  Percent,
+}
+
+@Composable
+private fun CheckoutPopupValueButton(
+  label: String,
+  value: String,
+  fontFamily: FontFamily,
+  modifier: Modifier = Modifier,
+  prefix: String = "",
+  suffix: String = "",
+  active: Boolean = false,
+  onClick: () -> Unit,
+) {
+  Surface(
+    modifier = modifier.clickable(onClick = onClick),
+    shape = CardShape,
+    color = Accent,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Text(
+        text = label,
+        color = Color.White.copy(alpha = 0.86f),
+        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp),
+      )
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        if (prefix.isNotBlank()) {
+          Text(prefix, color = Color.White, style = TextStyle(fontFamily = fontFamily, fontSize = 18.sp))
+          Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(
+          text = if (value.isBlank()) " " else value,
+          modifier = Modifier.weight(1f),
+          color = Color.White,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 20.sp),
+        )
+        if (suffix.isNotBlank()) {
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(suffix, color = Color.White, style = TextStyle(fontFamily = fontFamily, fontSize = 18.sp))
+        }
+      }
+      if (active) {
+        Spacer(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(2.dp)
+            .background(Color.White.copy(alpha = 0.9f), CardShape),
         )
       }
     }
@@ -3326,13 +3893,15 @@ fun CheckoutScreen(
   var discountPercent by rememberSaveable(row.id) { mutableStateOf("0") }
 
   val baseAmount = row.baseAmount()
+  val baseLanding = row.items.sumOf { it.landingPrice * it.quantity }
   val quantityValue = quantity.toIntOrNull()?.coerceAtLeast(1) ?: 1
+  val priceTotal = baseAmount * quantityValue
+  val landingTotal = baseLanding * quantityValue
   val discountValue = discount.toIntOrNull()?.coerceAtLeast(0) ?: 0
-  val discountPercentValue = discountPercent.toIntOrNull()?.coerceAtLeast(0) ?: 0
-  val discountByPercent = ((baseAmount * discountPercentValue) / 100f).toInt()
+  val discountPercentValue = discountPercent.toIntOrNull()?.coerceIn(0, 100) ?: 0
+  val discountByPercent = ((priceTotal * discountPercentValue) / 100f).toInt()
   val appliedDiscount = maxOf(discountValue, discountByPercent)
-  val finalAmount = (baseAmount - appliedDiscount).coerceAtLeast(0)
-  val landingTotal = row.items.sumOf { it.landingPrice * it.quantity }
+  val finalAmount = (priceTotal - appliedDiscount).coerceAtLeast(0)
 
   LaunchedEffect(finalAmount, row.id) {
     onAmountChange(finalAmount)
@@ -3355,33 +3924,19 @@ fun CheckoutScreen(
         .padding(horizontal = 16.dp, vertical = 14.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
-      ) {
-        AshokvatikaLogo(
-          modifier = Modifier.widthIn(max = 280.dp),
-          textSize = 34.sp,
-          markSize = 74.dp,
-        )
-        Column(
-          horizontalAlignment = Alignment.End,
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+      TopBrandBar(
+        textSize = 34.sp,
+        markSize = 74.dp,
+        onBack = onBack,
+        alignStart = true,
+        logoMaxWidth = 280.dp,
+        actionButtonSize = LockedHeaderActionSize,
+        actionIconSize = LockedHeaderIconSize,
+        actionSpacing = LockedHeaderActionSpacing,
+        logoTopOffset = LockedHeaderLogoTopOffset,
+        countBadge = {
           CircleIconAction(
-            size = 42.dp,
-            icon = {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Accent,
-              )
-            },
-            onClick = onBack,
-          )
-          CircleIconAction(
-            size = 42.dp,
+            size = LockedHeaderActionSize,
             icon = {
               if (cartCount > 0) {
                 Text(
@@ -3394,13 +3949,14 @@ fun CheckoutScreen(
                   imageVector = Icons.Filled.ShoppingCart,
                   contentDescription = "Open cart",
                   tint = Accent,
+                  modifier = Modifier.size(LockedHeaderIconSize),
                 )
               }
             },
             onClick = onOpenCart,
           )
-        }
-      }
+        },
+      )
 
       Text(
         text = row.title.ifBlank { "Checkout" },
@@ -3408,18 +3964,18 @@ fun CheckoutScreen(
         style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 26.sp),
       )
 
-      CheckoutGrid(
-        finalPrice = finalAmount,
-        beforeMarkup = baseAmount,
-        landingPrice = landingTotal,
-        quantityValue = quantityValue,
-        discountedUnitPrice = if (quantityValue > 0) finalAmount / quantityValue else finalAmount,
-        discountTotal = appliedDiscount,
-        priceTotal = finalAmount,
-        profitLoss = finalAmount - landingTotal,
-        discountPercent = discountPercentValue,
-        fontFamily = fontFamily,
-      )
+        CheckoutGrid(
+          finalPrice = finalAmount.toDouble(),
+          beforeMarkup = priceTotal.toDouble(),
+          landingPrice = landingTotal.toDouble(),
+          quantityValue = quantityValue.toDouble(),
+          discountedUnitPrice = if (quantityValue > 0) finalAmount.toDouble() / quantityValue.toDouble() else finalAmount.toDouble(),
+          discountTotal = appliedDiscount.toDouble(),
+          priceTotal = finalAmount.toDouble(),
+          profitLoss = (finalAmount - landingTotal).toDouble(),
+          discountPercent = discountPercentValue.toDouble(),
+          fontFamily = fontFamily,
+        )
 
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -3438,19 +3994,19 @@ fun CheckoutScreen(
           onValueChange = {
             discount = it.filter(Char::isDigit).ifBlank { "0" }
             val raw = discount.toIntOrNull() ?: 0
-            discountPercent = if (baseAmount > 0) ((raw * 100f) / baseAmount).toInt().toString() else "0"
+            discountPercent = if (priceTotal > 0) ((raw * 100f) / priceTotal).toInt().coerceIn(0, 100).toString() else "0"
           },
           fontFamily = fontFamily,
           modifier = Modifier.weight(1f),
-          prefix = "₹",
+          prefix = "\u20B9",
         )
         PopupValueEditor(
           label = "%",
           value = discountPercent,
           onValueChange = {
-            discountPercent = it.filter(Char::isDigit).ifBlank { "0" }
+            discountPercent = (it.filter(Char::isDigit).toIntOrNull() ?: 0).coerceIn(0, 100).toString()
             val raw = discountPercent.toIntOrNull() ?: 0
-            discount = ((baseAmount * raw) / 100f).toInt().toString()
+            discount = ((priceTotal * raw) / 100f).toInt().toString()
           },
           fontFamily = fontFamily,
           modifier = Modifier.weight(1f),
@@ -3641,26 +4197,54 @@ private fun SavedDealCard(
       modifier = Modifier.padding(14.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Text(
-        text = displayTitle,
-        color = Ink,
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 22.sp),
-      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = displayTitle,
+          modifier = Modifier.weight(1f),
+          color = Ink,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 22.sp),
+        )
+      }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
       ) {
-        DealAmountSection(
-          amount = deal.rows.sumOf { row -> row.displayAmount() },
-          fontFamily = fontFamily,
+        Column(
           modifier = Modifier.width(124.dp),
-          onEdit = { showDealCart = true },
-          actionLabel = "Cart",
-          useCartIcon = true,
-          showActionLabel = false,
-        )
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          DealAmountSection(
+            amount = deal.rows.sumOf { row -> row.displayAmount() },
+            fontFamily = fontFamily,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          Surface(
+            modifier = Modifier.clickable(onClick = { showDealCart = true }),
+            shape = CardShape,
+            color = Accent.copy(alpha = 0.08f),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, Accent.copy(alpha = 0.28f)),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+          ) {
+            Box(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              Image(
+                painter = painterResource(R.drawable.icon_add_to_cart_wheel),
+                contentDescription = "Open saved deal cart",
+                modifier = Modifier.size(28.dp),
+              )
+            }
+          }
+        }
 
         SavedDealClientSection(
           deal = deal,
@@ -3758,7 +4342,7 @@ private fun ClosedDealCartDialog(
 
         LabeledReadOnlyCard(
           label = "Amount",
-          value = "â‚¹ ${formatAmount(totalAmount)}",
+          value = "\u20B9 ${formatAmount(totalAmount)}",
           fontFamily = fontFamily,
           valueFontSize = 28.sp,
         )
@@ -3859,7 +4443,6 @@ private fun ClosedDealRowCard(
           amount = row.displayAmount(),
           fontFamily = fontFamily,
           modifier = Modifier.width(128.dp),
-          showActionLabel = false,
         )
 
         Row(
@@ -4169,15 +4752,15 @@ private fun CheckoutSummaryPopup(
         }
 
         CheckoutGrid(
-          finalPrice = finalPrice,
-          beforeMarkup = beforeMarkup,
-          landingPrice = landingPrice,
-          quantityValue = quantityValue,
-          discountedUnitPrice = discountedUnitPrice,
-          discountTotal = discountTotal,
-          priceTotal = priceTotal,
-          profitLoss = profitLoss,
-          discountPercent = discountPercent.toIntOrNull() ?: 0,
+          finalPrice = finalPrice.toDouble(),
+          beforeMarkup = beforeMarkup.toDouble(),
+          landingPrice = landingPrice.toDouble(),
+          quantityValue = quantityValue.toDouble(),
+          discountedUnitPrice = discountedUnitPrice.toDouble(),
+          discountTotal = discountTotal.toDouble(),
+          priceTotal = priceTotal.toDouble(),
+          profitLoss = profitLoss.toDouble(),
+          discountPercent = discountPercent.toDoubleOrNull() ?: 0.0,
           fontFamily = fontFamily,
         )
 
@@ -4232,7 +4815,7 @@ private fun MediaGalleryPopup(
 
   LaunchedEffect(mediaUris.size) {
     if (mediaUris.isNotEmpty()) {
-      sliderState.animateScrollToItem(mediaUris.lastIndex + 1)
+      sliderState.scrollToItem(mediaUris.lastIndex + 1)
       if (currentIndex > mediaUris.lastIndex) {
         currentIndex = mediaUris.lastIndex
       }
@@ -4606,6 +5189,7 @@ private fun VideoSurface(
     modifier = modifier,
     factory = { ctx ->
       android.widget.VideoView(ctx).apply {
+        tag = uriString
         setVideoURI(uri)
         setOnPreparedListener { mediaPlayer ->
           mediaPlayer.isLooping = true
@@ -4614,10 +5198,13 @@ private fun VideoSurface(
       }
     },
     update = { videoView ->
-      videoView.setVideoURI(uri)
-      videoView.setOnPreparedListener { mediaPlayer ->
-        mediaPlayer.isLooping = true
-        videoView.start()
+      if (videoView.tag != uriString) {
+        videoView.tag = uriString
+        videoView.setVideoURI(uri)
+        videoView.setOnPreparedListener { mediaPlayer ->
+          mediaPlayer.isLooping = true
+          videoView.start()
+        }
       }
     },
   )
@@ -5288,17 +5875,18 @@ private fun BuildProductCatalogRow(
 
 @Composable
 private fun CheckoutGrid(
-  finalPrice: Int,
-  beforeMarkup: Int,
-  landingPrice: Int,
-  quantityValue: Int,
-  discountedUnitPrice: Int,
-  discountTotal: Int,
-  priceTotal: Int,
-  profitLoss: Int,
-  discountPercent: Int,
+  finalPrice: Double,
+  beforeMarkup: Double,
+  landingPrice: Double,
+  quantityValue: Double,
+  discountedUnitPrice: Double,
+  discountTotal: Double,
+  priceTotal: Double,
+  profitLoss: Double,
+  discountPercent: Double,
   fontFamily: FontFamily,
 ) {
+  val detailTone = Color(0xFF575757)
   Surface(
     modifier = Modifier.fillMaxWidth(),
     shape = CardShape,
@@ -5334,57 +5922,57 @@ private fun CheckoutGrid(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("0%", fontFamily, Modifier.weight(1f))
-        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f))
-        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f))
+        CheckoutCell("0%", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
       }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("Discount", fontFamily, Modifier.weight(2f), emphasize = true)
-        CheckoutCell("\u20B9 ${formatAmount(discountTotal)}", fontFamily, Modifier.weight(1f), tone = Color(0xFFC05185))
+        CheckoutCell("Discount", fontFamily, Modifier.weight(2f), emphasize = true, tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(discountTotal)}", fontFamily, Modifier.weight(1f), tone = detailTone)
       }
 
-      CheckoutCell("MRP", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start)
+      CheckoutCell("MRP", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = detailTone)
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true)
-        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), emphasize = true)
-        CheckoutCell("%", fontFamily, Modifier.weight(1f), emphasize = true)
-      }
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        CheckoutCell(quantityValue.toString(), fontFamily, Modifier.weight(1f))
-        CheckoutCell("\u20B9 ${formatAmount(discountedUnitPrice)}", fontFamily, Modifier.weight(1f))
-        CheckoutCell(discountPercent.toString(), fontFamily, Modifier.weight(1f))
-      }
-
-      CheckoutCell("COST", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start)
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true)
-        CheckoutCell("\u20B9 ${formatAmount(beforeMarkup)}", fontFamily, Modifier.weight(1f), emphasize = true)
-        CheckoutCell("P&L", fontFamily, Modifier.weight(1f), emphasize = true)
+        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(beforeMarkup)}", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+        CheckoutCell("%", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
       }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell(quantityValue.toString(), fontFamily, Modifier.weight(1f))
-        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f))
-        CheckoutCell("\u20B9 ${formatAmount(profitLoss)}", fontFamily, Modifier.weight(1f))
+        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(discountedUnitPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("${formatEditableDecimal(discountPercent)}%", fontFamily, Modifier.weight(1f), tone = detailTone)
+      }
+
+      CheckoutCell("COST", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = detailTone)
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+        CheckoutCell("P&L", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("\u20B9 ${formatAmount(profitLoss)}", fontFamily, Modifier.weight(1f), tone = detailTone)
       }
     }
   }
@@ -5907,6 +6495,8 @@ private fun InlineEditor(
 private fun CircleIconAction(
   size: Dp,
   icon: @Composable () -> Unit,
+  borderColor: Color = Color.Transparent,
+  borderWidth: Dp = 0.dp,
   onClick: () -> Unit,
 ) {
   Surface(
@@ -5921,6 +6511,7 @@ private fun CircleIconAction(
       .clickable(onClick = onClick),
     shape = CircleShape,
     color = Color.White,
+    border = if (borderWidth > 0.dp) androidx.compose.foundation.BorderStroke(borderWidth, borderColor) else null,
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
@@ -6054,6 +6645,43 @@ private fun detailFor(destination: DashboardDestination): ProductDetail {
 
 private fun formatAmount(value: Int): String {
   return "%,d".format(value.coerceAtLeast(0))
+}
+
+private fun formatAmount(value: Double): String {
+  val normalized = if (kotlin.math.abs(value) < 0.005) 0.0 else value
+  return java.text.DecimalFormat("#,##0.##").format(normalized)
+}
+
+private fun formatEditableDecimal(value: Double): String {
+  val normalized = if (kotlin.math.abs(value) < 0.005) 0.0 else value
+  return java.text.DecimalFormat("0.##").format(normalized)
+}
+
+private fun parseDecimalInput(value: String): Double {
+  return value.toDoubleOrNull() ?: 0.0
+}
+
+private fun sanitizeDecimalEntry(
+  raw: String,
+  allowNegative: Boolean = false,
+): String {
+  if (raw.isBlank()) return ""
+  val builder = StringBuilder()
+  var hasDecimal = false
+  raw.forEachIndexed { index, char ->
+    when {
+      char.isDigit() -> builder.append(char)
+      char == '.' && !hasDecimal -> {
+        if (builder.isEmpty() || builder.toString() == "-") {
+          builder.append("0")
+        }
+        builder.append('.')
+        hasDecimal = true
+      }
+      allowNegative && char == '-' && index == 0 -> builder.append('-')
+    }
+  }
+  return builder.toString()
 }
 
 private fun OpenCartRow.baseAmount(): Int {
