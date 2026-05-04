@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "326819486805",
+    "project_id": "new-ashokvatika-nursery",
+    "storage_bucket": "new-ashokvatika-nursery.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:326819486805:android:5f00c693e95dfbaa9248dc",
+        "android_client_info": {
+          "package_name": "com.ashokvatika.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYCpdvLkblqML8V-trF6GNS1uOsnvz1Jg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

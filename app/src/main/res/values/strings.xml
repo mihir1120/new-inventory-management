@@ -1,4 +1,13 @@
 <resources>
   <string name="app_name">Ashokvatika</string>
+  <string name="otc_logo_content_description">Ashokvatika OTC logo</string>
+  <string name="otc_action_back">Back</string>
+  <string name="otc_action_cart">Open cart</string>
+  <string name="otc_action_closed">Open closed deals</string>
+  <string name="otc_demo_title_main">Fixed Header</string>
+  <string name="otc_demo_body_main">The logo stays outside the scroll container, so content changes never pull it up or down.</string>
+  <string name="otc_demo_title_cart">Scroll Content</string>
+  <string name="otc_demo_body_cart">Dynamic cards, lists, and action blocks belong inside the NestedScrollView below the header.</string>
+  <string name="otc_demo_title_closed">Safe Insets</string>
+  <string name="otc_demo_body_closed">System bar padding is applied with WindowInsetsCompat, keeping the UI clear of the status bar and gesture area.</string>
 </resources>
-

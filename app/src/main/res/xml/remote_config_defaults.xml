@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<defaultsMap>
+  <entry>
+    <key>experiments_enabled</key>
+    <value>false</value>
+  </entry>
+  <entry>
+    <key>gallery_share_sheet_variant</key>
+    <value>auto_open</value>
+  </entry>
+</defaultsMap>

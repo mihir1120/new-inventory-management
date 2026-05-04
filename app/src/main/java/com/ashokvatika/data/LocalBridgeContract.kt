@@ -1,0 +1,49 @@
+package com.ashokvatika.data
+
+import android.net.Uri
+
+object LocalBridgeContract {
+  const val Authority = "com.ashokvatika.app.bridge"
+  private val BaseUri: Uri = Uri.parse("content://$Authority")
+
+  object Inventory {
+    const val Table = "inventory_items"
+    const val Id = "id"
+    const val Category = "category"
+    const val Name = "name"
+    const val Details = "details"
+    const val Price = "price"
+    const val LandingPrice = "landingPrice"
+    const val Batch = "batch"
+    const val Sale = "sale"
+    const val Rent = "rent"
+    const val StockCount = "stockCount"
+    const val Status = "status"
+    const val Checkout = "checkout"
+    const val ImageUri = "imageUri"
+    const val ImageBase64 = "imageBase64"
+    const val QrCodeValue = "qrCodeValue"
+    const val UpdatedAt = "updatedAt"
+
+    val ContentUri: Uri = BaseUri.buildUpon().appendPath(Table).build()
+
+    fun itemUri(itemId: String): Uri = ContentUri.buildUpon().appendPath(itemId).build()
+  }
+
+  object AccessRequests {
+    const val Table = "access_requests"
+    const val RequestId = "requestId"
+    const val CustomerId = "customerId"
+    const val CustomerName = "customerName"
+    const val CustomerPhone = "customerPhone"
+    const val Status = "status"
+    const val ClientType = "clientType"
+    const val CreatedAt = "createdAt"
+    const val UpdatedAt = "updatedAt"
+    const val Note = "note"
+
+    val ContentUri: Uri = BaseUri.buildUpon().appendPath(Table).build()
+
+    fun itemUri(requestId: String): Uri = ContentUri.buildUpon().appendPath(requestId).build()
+  }
+}

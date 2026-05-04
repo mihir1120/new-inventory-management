@@ -1,8 +1,13 @@
 .gradle/
+.gradle-user-home/
+.gradle-user-home-verify/
 .idea/
 .codex_dm_tmp/
 .tmp/
+.kotlin/
 build/
 **/build/
 local.properties
 *.iml
+gradle_compile_err.txt
+gradle_compile_out.txt

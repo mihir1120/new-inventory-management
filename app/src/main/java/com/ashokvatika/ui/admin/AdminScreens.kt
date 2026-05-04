@@ -7,12 +7,16 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,8 +27,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -53,8 +59,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddToDrive
@@ -65,6 +73,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -92,6 +101,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -99,6 +109,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontStyle
@@ -118,7 +129,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
-import com.ashokvatika.R
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
+import com.ashokvatika.app.R
+import com.ashokvatika.config.AppExperimentManager
+import com.ashokvatika.config.GalleryShareSheetVariant
+import com.ashokvatika.data.AdminAccessRequest
 import com.ashokvatika.ui.components.AshokvatikaLogo
 import com.ashokvatika.ui.components.BrandButtonGlyph
 import com.ashokvatika.ui.components.BrandButtonIcon
@@ -146,6 +164,18 @@ private val UploadPill = Color(0x26FFFFFF)
 private val OtcHeaderActionSize = 54.dp
 private val OtcHeaderIconSize = 24.dp
 private val OtcCartIconSize = 31.2.dp
+private val OtcHeaderHorizontalPadding = 20.dp
+private val OtcPageVerticalPadding = 16.dp
+private val OtcHeaderActionSpacing = 12.dp
+private val OtcHeaderLogoMaxWidth = 360.dp
+private val OtcHeaderTopSpace = 8.dp
+private val OtcHeaderFrameHeight = 186.dp
+private val OtcHeaderLogoWidth = 320.dp
+private val OtcHeaderLogoHeight = 122.4.dp
+private val OtcHeaderTopOffset = OtcPageVerticalPadding + OtcHeaderTopSpace
+private val OtcMainContentTopPadding = OtcHeaderTopOffset + OtcHeaderFrameHeight + 10.dp
+private val OtcOpenCartContentTopPadding = OtcHeaderTopOffset + OtcHeaderFrameHeight + 12.dp
+private val OtcClosedContentTopPadding = OtcHeaderTopOffset + OtcHeaderFrameHeight + 14.dp
 private val LockedHeaderLogoTopOffset = (-24).dp
 private val LockedHeaderActionSize = 42.dp
 private val LockedHeaderIconSize = 24.dp
@@ -173,6 +203,11 @@ data class InventoryItem(
   val imageUri: String?,
   val mediaUris: List<String> = emptyList(),
   val status: String = "complete",
+  val templatePrimaryTitle: String = "",
+  val templatePrimaryDescription: String = "",
+  val templateSecondaryTitle: String = "",
+  val templateSecondaryDescription: String = "",
+  val templateContact: String = "",
 )
 
 data class CartProductItem(
@@ -182,6 +217,7 @@ data class CartProductItem(
   val mrp: Int,
   val landingPrice: Int,
   val quantity: Int,
+  val imageUri: String? = null,
 )
 
 data class OpenCartRow(
@@ -225,8 +261,25 @@ private data class BuildProductSelection(
     get() = item.price * quantity
 }
 
+private data class GalleryImageItem(
+  val id: String,
+  val uriString: String,
+)
+
+private data class SharePlatformAction(
+  val id: String,
+  val label: String,
+  val icon: androidx.compose.ui.graphics.vector.ImageVector,
+  val packageName: String? = null,
+)
+
 @Composable
 fun AdminHomeScreen(
+  firebaseConnected: Boolean,
+  pendingAccessRequests: List<AdminAccessRequest>,
+  syncMessage: String?,
+  onApproveRequest: (String) -> Unit,
+  onDenyRequest: (String) -> Unit,
   onTileClick: (DashboardDestination) -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
@@ -271,10 +324,41 @@ fun AdminHomeScreen(
       Spacer(modifier = Modifier.height(topPadding))
 
       AshokvatikaLogo(
-        modifier = Modifier.fillMaxWidth(0.96f),
+        modifier = Modifier.fillMaxWidth(0.6f),
         textSize = brandTextSize,
         markSize = brandMarkSize,
       )
+
+      Spacer(modifier = Modifier.height(14.dp))
+      FirebaseStatusCard(
+        firebaseConnected = firebaseConnected,
+        fontFamily = dmSansThin,
+      )
+
+      if (!syncMessage.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+          text = syncMessage,
+          color = Accent,
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = dmSansThin,
+            fontWeight = FontWeight.Normal,
+            fontSize = 16.sp,
+            lineHeight = 20.sp,
+          ),
+        )
+      }
+
+      if (pendingAccessRequests.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(18.dp))
+        PendingAccessApprovalCard(
+          requests = pendingAccessRequests,
+          fontFamily = dmSansThin,
+          onApproveRequest = onApproveRequest,
+          onDenyRequest = onDenyRequest,
+        )
+      }
 
       Spacer(modifier = Modifier.height(topSpacer))
 
@@ -349,6 +433,135 @@ fun AdminHomeScreen(
 }
 
 @Composable
+private fun FirebaseStatusCard(
+  firebaseConnected: Boolean,
+  fontFamily: FontFamily,
+) {
+  val title = if (firebaseConnected) "Firebase Connected" else "Firebase Not Connected"
+  val subtitle = if (firebaseConnected) {
+    "Inventory and checkout data can sync to cloud."
+  } else {
+    "App is running locally. Cloud sync is off."
+  }
+  val accentColor = if (firebaseConnected) AccentGreen else Accent
+  val backgroundColor = if (firebaseConnected) Color(0xFFEAF7EE) else Color(0xFFFFF1E6)
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = CardShape,
+    color = backgroundColor,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Box(
+        modifier = Modifier
+          .size(14.dp)
+          .background(accentColor, CircleShape),
+      )
+      Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          text = title,
+          color = accentColor,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 20.sp,
+            lineHeight = 24.sp,
+          ),
+        )
+        Text(
+          text = subtitle,
+          color = Ink,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+          ),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun PendingAccessApprovalCard(
+  requests: List<AdminAccessRequest>,
+  fontFamily: FontFamily,
+  onApproveRequest: (String) -> Unit,
+  onDenyRequest: (String) -> Unit,
+) {
+  val activeRequest = requests.firstOrNull() ?: return
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = CardShape,
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(
+        text = if (requests.size > 1) "Pending customer approvals (${requests.size})" else "Pending customer approval",
+        color = AccentGreen,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 22.sp,
+        ),
+      )
+      Text(
+        text = activeRequest.customerName,
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 26.sp,
+        ),
+      )
+      Text(
+        text = activeRequest.customerPhone.ifBlank { "Phone not available" },
+        color = Accent,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 18.sp,
+        ),
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        ActionButtonCard(
+          title = "Approve",
+          color = AccentGreen,
+          fontFamily = fontFamily,
+          onClick = { onApproveRequest(activeRequest.requestId) },
+          modifier = Modifier.weight(1f),
+        )
+        ActionButtonCard(
+          title = "Deny",
+          color = Accent,
+          fontFamily = fontFamily,
+          onClick = { onDenyRequest(activeRequest.requestId) },
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+  }
+}
+
+@Composable
 fun CategoryScreen(
   title: DashboardDestination,
   initialItem: InventoryItem?,
@@ -358,33 +571,42 @@ fun CategoryScreen(
   val dmSansThin = rememberDashboardFont()
   val seed = remember(title, initialItem) { initialItem?.toProductDetail() ?: detailFor(title) }
   val context = LocalContext.current
+  val initialItemId = initialItem?.id
+  val initialMediaUris = remember(seed.mediaUris, seed.imageUri) {
+    seed.mediaUris.ifEmpty { listOfNotNull(seed.imageUri) }
+  }
 
-  var productName by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.name) }
-  var batchText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.batch) }
-  var saleText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.sale) }
-  var rentText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.rent) }
-  var detailsText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.details) }
-  var priceText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.price) }
-  var checkoutText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.checkout) }
-  var showDetailsPopup by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var showDetailsCalendar by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var vendorNameText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var vendorPhoneText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var vendorEmailText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var landingPriceText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var othersText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var markupText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("") }
-  var selectedDetailsDate by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.details) }
-  var mediaUris by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.mediaUris.ifEmpty { listOfNotNull(seed.imageUri) }) }
-  var showUploadOptions by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(seed.mediaUris.ifEmpty { listOfNotNull(seed.imageUri) }.isEmpty()) }
+  var productName by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.name) }
+  var batchText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.batch) }
+  var saleText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.sale) }
+  var rentText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.rent) }
+  var detailsText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.details) }
+  var priceText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.price) }
+  var checkoutText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.checkout) }
+  var showDetailsPopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var showDetailsCalendar by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var vendorNameText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var vendorPhoneText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var vendorEmailText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var landingPriceText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var othersText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var markupText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var selectedDetailsDate by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.details) }
+  var mediaUris by rememberSaveable(title.name, initialItemId) { mutableStateOf(initialMediaUris) }
+  var mediaPrimaryTitleText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.templatePrimaryTitle) }
+  var mediaPrimaryDescriptionText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.templatePrimaryDescription) }
+  var mediaSecondaryTitleText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.templateSecondaryTitle) }
+  var mediaSecondaryDescriptionText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.templateSecondaryDescription) }
+  var mediaContactText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.templateContact) }
+  var showUploadOptions by rememberSaveable(title.name, initialItemId) { mutableStateOf(initialMediaUris.isEmpty()) }
   var showBackConfirm by remember { mutableStateOf(false) }
-  var showPricePopup by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var showCheckoutPopup by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var showMediaPopup by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var showPriceValidation by rememberSaveable(title.name, initialItem?.id) { mutableStateOf(false) }
-  var checkoutQuantityText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("1") }
-  var checkoutDiscountText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("0") }
-  var checkoutDiscountPercentText by rememberSaveable(title.name, initialItem?.id) { mutableStateOf("0") }
+  var showPricePopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var showCheckoutPopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var showMediaPopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var showPriceValidation by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
+  var checkoutQuantityText by rememberSaveable(title.name, initialItemId) { mutableStateOf("1") }
+  var checkoutDiscountText by rememberSaveable(title.name, initialItemId) { mutableStateOf("0") }
+  var checkoutDiscountPercentText by rememberSaveable(title.name, initialItemId) { mutableStateOf("0") }
   var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
   val buildProductCatalog = remember { buildProductCatalog() }
   val selectedBuildProducts = remember { mutableStateMapOf<String, Int>() }
@@ -395,7 +617,6 @@ fun CategoryScreen(
   var buildProductQuantityDraft by remember { mutableStateOf("1") }
   var pendingDeleteSelectionId by remember { mutableStateOf<String?>(null) }
   var cameraCapturePendingConfirmation by remember { mutableStateOf(false) }
-
   val supportsMediaGallery = title != DashboardDestination.OTC
 
   val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -505,6 +726,11 @@ fun CategoryScreen(
         unitPrice = unitPrice,
         checkoutDisplay = checkoutDisplay,
         selectedMediaUris = mediaUris,
+        templatePrimaryTitle = mediaPrimaryTitleText,
+        templatePrimaryDescription = mediaPrimaryDescriptionText,
+        templateSecondaryTitle = mediaSecondaryTitleText,
+        templateSecondaryDescription = mediaSecondaryDescriptionText,
+        templateContact = mediaContactText,
         status = "complete",
       ),
     )
@@ -524,6 +750,11 @@ fun CategoryScreen(
         unitPrice = unitPrice,
         checkoutDisplay = checkoutDisplay,
         selectedMediaUris = mediaUris,
+        templatePrimaryTitle = mediaPrimaryTitleText,
+        templatePrimaryDescription = mediaPrimaryDescriptionText,
+        templateSecondaryTitle = mediaSecondaryTitleText,
+        templateSecondaryDescription = mediaSecondaryDescriptionText,
+        templateContact = mediaContactText,
         status = "incomplete",
       ),
     )
@@ -1037,6 +1268,26 @@ fun CategoryScreen(
       )
     }
 
+    if (showMediaPopup) {
+      MediaGalleryPopup(
+        mediaUris = mediaUris,
+        productName = productName,
+        primaryTitle = mediaPrimaryTitleText,
+        onPrimaryTitleChange = { mediaPrimaryTitleText = it },
+        primaryDescription = mediaPrimaryDescriptionText,
+        onPrimaryDescriptionChange = { mediaPrimaryDescriptionText = it },
+        secondaryTitle = mediaSecondaryTitleText,
+        onSecondaryTitleChange = { mediaSecondaryTitleText = it },
+        secondaryDescription = mediaSecondaryDescriptionText,
+        onSecondaryDescriptionChange = { mediaSecondaryDescriptionText = it },
+        contactText = mediaContactText,
+        onContactTextChange = { mediaContactText = it },
+        fontFamily = dmSansThin,
+        onAddFromDrive = { mediaPopupDriveLauncher.launch(arrayOf("image/*")) },
+        onClose = { showMediaPopup = false },
+      )
+    }
+
     if (showBackConfirm) {
       ConfirmChangesDialog(
         onDismiss = {
@@ -1055,14 +1306,6 @@ fun CategoryScreen(
       )
     }
 
-    if (showMediaPopup) {
-      MediaGalleryPopup(
-        mediaUris = mediaUris,
-        fontFamily = dmSansThin,
-        onAddFromDrive = { mediaPopupDriveLauncher.launch(arrayOf("image/*")) },
-        onClose = { showMediaPopup = false },
-      )
-    }
   }
 }
 
@@ -1129,12 +1372,14 @@ fun InventoryListScreen(
             onValueChange = { searchQuery = it },
             fontFamily = dmSansThin,
             modifier = Modifier.weight(1f),
+            placeholder = "",
           )
 
           AddInventoryButton(
             fontFamily = dmSansThin,
             onClick = onAddItem,
             modifier = Modifier.weight(1f),
+            label = "",
           )
         }
       }
@@ -1214,30 +1459,6 @@ private fun InventoryListHeader(
       logoTopOffset = LockedHeaderLogoTopOffset,
     )
 
-    Spacer(modifier = Modifier.height(2.dp))
-
-    Text(
-      text = "Inventory list : ${title.title}",
-      color = AccentGreen,
-      style = TextStyle(
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 28.sp,
-        lineHeight = 30.sp,
-      ),
-    )
-
-    Spacer(modifier = Modifier.height(4.dp))
-
-    Text(
-      text = "$itemCount items saved in ${title.title}.",
-      color = Ink.copy(alpha = 0.35f),
-      style = TextStyle(
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-      ),
-    )
   }
 }
 
@@ -1247,23 +1468,34 @@ private fun TopBrandBar(
   markSize: Dp,
   onBack: () -> Unit,
   alignStart: Boolean = false,
-  logoMaxWidth: Dp = 360.dp,
+  logoMaxWidth: Dp = OtcHeaderLogoMaxWidth,
   actionButtonSize: Dp = 42.dp,
   actionIconSize: Dp = 24.dp,
   actionSpacing: Dp = 10.dp,
   logoTopOffset: Dp = 0.dp,
   actionBorderColor: Color = Color.Transparent,
   actionBorderWidth: Dp = 0.dp,
-  countBadge: @Composable (() -> Unit)? = null,
+  middleAction: (@Composable () -> Unit)? = null,
+  bottomAction: (@Composable () -> Unit)? = null,
+  containerHeight: Dp = Dp.Unspecified,
 ) {
+  val actionColumnHeight = (actionButtonSize * 3f) + (actionSpacing * 2f)
+  val containerModifier = Modifier
+    .fillMaxWidth()
+    .then(
+      if (containerHeight != Dp.Unspecified) {
+        Modifier.height(containerHeight)
+      } else {
+        Modifier.heightIn(min = actionColumnHeight)
+      },
+    )
   if (alignStart) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.Top,
+    Box(
+      modifier = containerModifier,
     ) {
       AshokvatikaLogo(
         modifier = Modifier
+          .align(Alignment.TopStart)
           .widthIn(max = logoMaxWidth)
           .offset(y = logoTopOffset),
         textSize = textSize,
@@ -1271,29 +1503,33 @@ private fun TopBrandBar(
       )
 
       Column(
+        modifier = Modifier.align(Alignment.TopEnd),
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(actionSpacing),
       ) {
-        CircleIconAction(
-          size = actionButtonSize,
-          borderColor = actionBorderColor,
-          borderWidth = actionBorderWidth,
-          icon = {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-              tint = Accent,
-              modifier = Modifier.size(actionIconSize),
-            )
-          },
-          onClick = onBack,
-        )
-        countBadge?.invoke()
+        OtcHeaderActionSlot(actionButtonSize) {
+          CircleIconAction(
+            size = actionButtonSize,
+            borderColor = actionBorderColor,
+            borderWidth = actionBorderWidth,
+            icon = {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Accent,
+                modifier = Modifier.size(actionIconSize),
+              )
+            },
+            onClick = onBack,
+          )
+        }
+        OtcHeaderActionSlot(actionButtonSize, middleAction)
+        OtcHeaderActionSlot(actionButtonSize, bottomAction)
       }
     }
   } else {
     Box(
-      modifier = Modifier.fillMaxWidth(),
+      modifier = containerModifier,
       contentAlignment = Alignment.Center,
     ) {
       AshokvatikaLogo(
@@ -1311,23 +1547,91 @@ private fun TopBrandBar(
           horizontalAlignment = Alignment.End,
           verticalArrangement = Arrangement.spacedBy(actionSpacing),
         ) {
-          CircleIconAction(
-            size = actionButtonSize,
-            borderColor = actionBorderColor,
-            borderWidth = actionBorderWidth,
-            icon = {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Accent,
-                modifier = Modifier.size(actionIconSize),
-              )
-            },
-            onClick = onBack,
-          )
-          countBadge?.invoke()
+          OtcHeaderActionSlot(actionButtonSize) {
+            CircleIconAction(
+              size = actionButtonSize,
+              borderColor = actionBorderColor,
+              borderWidth = actionBorderWidth,
+              icon = {
+                Icon(
+                  imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                  contentDescription = "Back",
+                  tint = Accent,
+                  modifier = Modifier.size(actionIconSize),
+                )
+              },
+              onClick = onBack,
+            )
+          }
+          OtcHeaderActionSlot(actionButtonSize, middleAction)
+          OtcHeaderActionSlot(actionButtonSize, bottomAction)
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun OtcHeaderActionSlot(
+  size: Dp,
+  content: (@Composable () -> Unit)? = null,
+) {
+  Box(
+    modifier = Modifier.size(size),
+    contentAlignment = Alignment.Center,
+  ) {
+    content?.invoke()
+  }
+}
+
+@Composable
+private fun OtcActionOnlyHeader(
+  modifier: Modifier = Modifier,
+  onBack: () -> Unit,
+  middleAction: (@Composable () -> Unit)? = null,
+  bottomAction: (@Composable () -> Unit)? = null,
+  actionButtonSize: Dp = OtcHeaderActionSize,
+  actionIconSize: Dp = OtcHeaderIconSize,
+  actionSpacing: Dp = OtcHeaderActionSpacing,
+  containerHeight: Dp = OtcHeaderFrameHeight,
+) {
+  Box(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(containerHeight),
+  ) {
+    AshokvatikaLogo(
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .width(OtcHeaderLogoWidth),
+      textSize = 30.sp,
+      markSize = 60.dp,
+      fixedHeight = OtcHeaderLogoHeight,
+    )
+
+    Column(
+      modifier = Modifier.align(Alignment.TopEnd),
+      horizontalAlignment = Alignment.End,
+      verticalArrangement = Arrangement.spacedBy(actionSpacing),
+    ) {
+      OtcHeaderActionSlot(actionButtonSize) {
+        CircleIconAction(
+          size = actionButtonSize,
+          borderColor = Accent,
+          borderWidth = 2.dp,
+          icon = {
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+              contentDescription = "Back",
+              tint = Accent,
+              modifier = Modifier.size(actionIconSize),
+            )
+          },
+          onClick = onBack,
+        )
+      }
+      OtcHeaderActionSlot(actionButtonSize, middleAction)
+      OtcHeaderActionSlot(actionButtonSize, bottomAction)
     }
   }
 }
@@ -1355,6 +1659,7 @@ private fun AddInventoryButton(
   fontFamily: FontFamily,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
+  label: String = "Add items",
 ) {
   Surface(
     modifier = modifier.clickable(onClick = onClick),
@@ -1370,15 +1675,19 @@ private fun AddInventoryButton(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      Text(
-        text = "Add items",
-        color = Color.White,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 24.sp,
-        ),
-      )
+      if (label.isNotBlank()) {
+        Text(
+          text = label,
+          color = Color.White,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 24.sp,
+          ),
+        )
+      } else {
+        Spacer(modifier = Modifier.width(1.dp))
+      }
       Icon(
         imageVector = Icons.Filled.Add,
         contentDescription = "Add item",
@@ -1395,6 +1704,7 @@ private fun SearchInventoryField(
   onValueChange: (String) -> Unit,
   fontFamily: FontFamily,
   modifier: Modifier = Modifier,
+  placeholder: String = "Search items",
 ) {
   Surface(
     modifier = modifier,
@@ -1430,9 +1740,9 @@ private fun SearchInventoryField(
           color = Color.White,
         ),
         decorationBox = { innerTextField ->
-          if (value.isBlank()) {
+          if (value.isBlank() && placeholder.isNotBlank()) {
             Text(
-              text = "Search items",
+              text = placeholder,
               color = Color.White.copy(alpha = 0.92f),
               style = TextStyle(
                 fontFamily = fontFamily,
@@ -1806,7 +2116,7 @@ fun OtcScreen(
   onAddToCart: (List<CartProductItem>) -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
-  val catalog = remember { otcCatalog() }
+  val catalog = otcCatalog()
   var activeItemId by rememberSaveable { mutableStateOf<String?>(null) }
   var draftQuantity by rememberSaveable { mutableStateOf("1") }
   val quantities = remember { mutableStateMapOf<String, Int>() }
@@ -1821,6 +2131,7 @@ fun OtcScreen(
       mrp = item.price.toIntOrNull() ?: 0,
       landingPrice = item.landingPrice.toIntOrNull() ?: 0,
       quantity = quantity,
+      imageUri = item.imageUri,
     )
   }
   val activeItem = catalog.firstOrNull { it.id == activeItemId }
@@ -1841,117 +2152,55 @@ fun OtcScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
-    val horizontalPadding = 24.dp
+    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
     val amountSize = when {
-      maxWidth > 1000.dp -> 81.sp
-      maxWidth > 700.dp -> 69.sp
-      else -> 54.sp
+      maxWidth > 1000.dp -> 60.sp
+      maxWidth > 700.dp -> 48.sp
+      else -> 40.sp
     }
     val mrpLabelSize = when {
-      maxWidth > 1000.dp -> 14.sp
-      maxWidth > 700.dp -> 12.sp
-      else -> 10.sp
+      maxWidth > 1000.dp -> 13.sp
+      maxWidth > 700.dp -> 11.sp
+      else -> 9.sp
     }
-    val thumbnailSize = minOf((contentWidth - 40.dp) / 6.4f, if (maxWidth > 700.dp) 64.dp else 48.dp)
+    val thumbnailSize = minOf((contentWidth - 20.dp) / 6.4f, if (maxWidth > 700.dp) 52.dp else 40.dp)
     val carouselCardWidth = when {
-      maxWidth > 1200.dp -> 190.dp
-      maxWidth > 900.dp -> 172.dp
-      maxWidth > 700.dp -> 152.dp
-      else -> minOf(contentWidth * 0.36f, 132.dp)
+      maxWidth > 1200.dp -> 194.dp
+      maxWidth > 900.dp -> 176.dp
+      maxWidth > 700.dp -> 156.dp
+      else -> minOf(contentWidth * 0.39f, 140.dp)
     }
     val carouselCardHeight = when {
-      maxHeight > 900.dp -> 178.dp
-      maxHeight > 760.dp -> 148.dp
-      else -> 124.dp
+      maxHeight > 900.dp -> 186.dp
+      maxHeight > 760.dp -> 156.dp
+      else -> 132.dp
     }
     val carouselPhotoSize = when {
-      maxHeight > 900.dp -> 96.dp
-      maxHeight > 760.dp -> 80.dp
-      else -> 62.dp
+      maxHeight > 900.dp -> 100.dp
+      maxHeight > 760.dp -> 84.dp
+      else -> 66.dp
     }
     val sectionGap = when {
-      maxHeight > 900.dp -> 16.dp
-      maxHeight > 720.dp -> 12.dp
-      else -> 10.dp
+      maxHeight > 900.dp -> 8.dp
+      maxHeight > 720.dp -> 6.dp
+      else -> 4.dp
     }
-    val topBarTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
-    val topBarMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
-    val otcTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
-
+    val titleAssetSize = if (maxHeight > 760.dp) 30.dp else 24.dp
+    val visibleSelectionSlots = if (maxWidth > 700.dp) 6 else 5
     Column(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = horizontalPadding, vertical = 16.dp),
+        .padding(
+          start = horizontalPadding,
+          top = OtcMainContentTopPadding,
+          end = horizontalPadding,
+          bottom = OtcPageVerticalPadding,
+        ),
       horizontalAlignment = Alignment.Start,
     ) {
-      Spacer(modifier = Modifier.height(otcTopSpace))
-
-      TopBrandBar(
-        textSize = topBarTextSize,
-        markSize = topBarMarkSize,
-        onBack = onBack,
-        alignStart = true,
-        logoMaxWidth = 360.dp,
-        actionButtonSize = OtcHeaderActionSize,
-        actionIconSize = OtcHeaderIconSize,
-        actionSpacing = 12.dp,
-        logoTopOffset = LockedHeaderLogoTopOffset,
-        actionBorderColor = Accent,
-        actionBorderWidth = 2.dp,
-        countBadge = {
-          Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            CircleIconAction(
-              size = OtcHeaderActionSize,
-              borderColor = Accent,
-              borderWidth = 2.dp,
-              icon = {
-                if (cartCount > 0) {
-                  Text(
-                    text = cartCount.toString(),
-                    color = Accent,
-                    style = TextStyle(
-                      fontFamily = dmSansThin,
-                      fontWeight = FontWeight.Normal,
-                      fontSize = 20.sp,
-                    ),
-                  )
-                } else {
-                  Box(
-                    modifier = Modifier.size(OtcCartIconSize),
-                    contentAlignment = Alignment.Center,
-                  ) {
-                    Image(
-                      painter = painterResource(R.drawable.wheelbarrow),
-                      contentDescription = "Open cart",
-                      modifier = Modifier.size(OtcCartIconSize),
-                    )
-                  }
-                }
-              },
-              onClick = onOpenCart,
-            )
-            CircleIconAction(
-              size = OtcHeaderActionSize,
-              borderColor = Accent,
-              borderWidth = 2.dp,
-              icon = {
-                ClosedDealsShortcutIcon()
-              },
-              onClick = onOpenSavedDeals,
-            )
-          }
-        },
-      )
-
-      Spacer(modifier = Modifier.height(10.dp))
-
       MrpEditor(
         totalAmount = totalAmount,
         landingTotal = landingTotal,
@@ -1979,7 +2228,7 @@ fun OtcScreen(
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        repeat(maxOf(6, selectedItems.size)) { index ->
+        repeat(maxOf(visibleSelectionSlots, selectedItems.size)) { index ->
           OtcSelectionThumbnail(
             item = selectedItems.getOrNull(index),
             size = thumbnailSize,
@@ -2018,6 +2267,8 @@ fun OtcScreen(
 
       OtcCarouselSection(
         title = "Plant",
+        titleImageRes = R.drawable.otc_title_plants,
+        titleImageSize = titleAssetSize,
         items = catalog.filter { it.category == OtcCarouselCategory.Plant },
         selectedIds = selectedIds,
         onItemTap = { item ->
@@ -2034,6 +2285,8 @@ fun OtcScreen(
 
       OtcCarouselSection(
         title = "Pots",
+        titleImageRes = R.drawable.otc_title_pots,
+        titleImageSize = titleAssetSize,
         items = catalog.filter { it.category == OtcCarouselCategory.Pots },
         selectedIds = selectedIds,
         onItemTap = { item ->
@@ -2050,6 +2303,8 @@ fun OtcScreen(
 
       OtcCarouselSection(
         title = "Supplies",
+        titleImageRes = R.drawable.otc_title_supplies,
+        titleImageSize = titleAssetSize,
         items = catalog.filter { it.category == OtcCarouselCategory.Supplies },
         selectedIds = selectedIds,
         onItemTap = { item ->
@@ -2062,6 +2317,57 @@ fun OtcScreen(
         photoSize = carouselPhotoSize,
       )
     }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+      onBack = onBack,
+      middleAction = {
+        CircleIconAction(
+          size = OtcHeaderActionSize,
+          borderColor = Accent,
+          borderWidth = 2.dp,
+          icon = {
+            if (cartCount > 0) {
+              Text(
+                text = cartCount.toString(),
+                color = Accent,
+                style = TextStyle(
+                  fontFamily = dmSansThin,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 20.sp,
+                ),
+              )
+            } else {
+              Box(
+                modifier = Modifier.size(OtcCartIconSize),
+                contentAlignment = Alignment.Center,
+              ) {
+                Image(
+                  painter = painterResource(R.drawable.wheelbarrow),
+                  contentDescription = "Open cart",
+                  modifier = Modifier.size(OtcCartIconSize),
+                )
+              }
+            }
+          },
+          onClick = onOpenCart,
+        )
+      },
+      bottomAction = {
+        CircleIconAction(
+          size = OtcHeaderActionSize,
+          borderColor = Accent,
+          borderWidth = 2.dp,
+          icon = {
+            ClosedDealsShortcutIcon()
+          },
+          onClick = onOpenSavedDeals,
+        )
+      },
+    )
 
   }
 }
@@ -2133,6 +2439,7 @@ private fun OtcQuantityPopup(
   imageSize: Dp,
 ) {
   var showQuantityKeypad by remember(item.id) { mutableStateOf(false) }
+  val imageBitmap by rememberDecodedImage(item.imageUri)
 
   Surface(
     modifier = Modifier
@@ -2166,17 +2473,26 @@ private fun OtcQuantityPopup(
             .clip(CircleShape),
           contentAlignment = Alignment.Center,
         ) {
-          Text(
-            text = item.shortName,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            style = TextStyle(
-              fontFamily = fontFamily,
-              fontWeight = FontWeight.Thin,
-              fontSize = minOf(imageSize.value * 0.22f, 24f).sp,
-              lineHeight = minOf(imageSize.value * 0.25f, 28f).sp,
-            ),
-          )
+          if (imageBitmap != null) {
+            Image(
+              bitmap = imageBitmap!!,
+              contentDescription = item.name,
+              contentScale = ContentScale.Crop,
+              modifier = Modifier.fillMaxSize(),
+            )
+          } else {
+            Text(
+              text = item.shortName,
+              color = Color.White,
+              textAlign = TextAlign.Center,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Thin,
+                fontSize = minOf(imageSize.value * 0.22f, 24f).sp,
+                lineHeight = minOf(imageSize.value * 0.25f, 28f).sp,
+              ),
+            )
+          }
         }
 
         Column(
@@ -2228,7 +2544,7 @@ private fun OtcQuantityPopup(
               verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
               Text(
-                text = "\u20B9 " + item.price,
+        text = "\u20B9 ${item.price}",
                 color = Ink,
                 style = TextStyle(
                   fontFamily = fontFamily,
@@ -2337,6 +2653,7 @@ private fun OtcSelectionThumbnail(
   fontFamily: FontFamily,
   onDelete: (OtcCarouselItem) -> Unit,
 ) {
+  val imageBitmap by rememberDecodedImage(item?.imageUri)
   Box(
     modifier = Modifier
       .size(size)
@@ -2361,24 +2678,36 @@ private fun OtcSelectionThumbnail(
     contentAlignment = Alignment.Center,
   ) {
     if (item != null) {
-      Text(
-        text = item.shortName,
-        color = Color.White,
-        textAlign = TextAlign.Center,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Thin,
-          fontSize = minOf(size.value * 0.22f, 13f).sp,
-          lineHeight = minOf(size.value * 0.24f, 14f).sp,
-        ),
-      )
+      if (imageBitmap != null) {
+        Image(
+          bitmap = imageBitmap!!,
+          contentDescription = item.name,
+          contentScale = ContentScale.Crop,
+          modifier = Modifier.fillMaxSize(),
+        )
+      } else {
+        Text(
+          text = item.shortName,
+          color = Color.White,
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Thin,
+            fontSize = minOf(size.value * 0.22f, 13f).sp,
+            lineHeight = minOf(size.value * 0.24f, 14f).sp,
+          ),
+        )
+      }
     }
   }
 }
 
 @Composable
 private fun OtcCarouselSection(
+  modifier: Modifier = Modifier,
   title: String,
+  titleImageRes: Int? = null,
+  titleImageSize: Dp = 24.dp,
   items: List<OtcCarouselItem>,
   selectedIds: Set<String>,
   onItemTap: (OtcCarouselItem) -> Unit,
@@ -2388,27 +2717,36 @@ private fun OtcCarouselSection(
   photoSize: Dp,
 ) {
   Column(
-    modifier = Modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
-    Text(
-      text = title,
-      modifier = Modifier.fillMaxWidth(),
-      style = TextStyle(
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 18.sp,
-        lineHeight = 20.sp,
-        color = Ink,
-      ),
-    )
+    if (titleImageRes != null) {
+      Image(
+        painter = painterResource(titleImageRes),
+        contentDescription = title,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.size(titleImageSize),
+      )
+    } else {
+      Text(
+        text = title,
+        modifier = Modifier.fillMaxWidth(),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 18.sp,
+          lineHeight = 20.sp,
+          color = Ink,
+        ),
+      )
+    }
 
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .horizontalScroll(rememberScrollState()),
-      horizontalArrangement = Arrangement.spacedBy(20.dp),
-      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.Top,
     ) {
       items.forEach { item ->
         OtcCarouselCard(
@@ -2421,7 +2759,6 @@ private fun OtcCarouselSection(
           photoSize = photoSize,
         )
       }
-      Spacer(modifier = Modifier.width(24.dp))
     }
   }
 }
@@ -2436,6 +2773,7 @@ private fun OtcCarouselCard(
   cardHeight: Dp,
   photoSize: Dp,
 ) {
+  val imageBitmap by rememberDecodedImage(item.imageUri)
   Surface(
     modifier = Modifier
       .width(cardWidth)
@@ -2454,7 +2792,7 @@ private fun OtcCarouselCard(
     Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 8.dp, vertical = 7.dp),
+        .padding(horizontal = 8.dp, vertical = 8.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -2465,17 +2803,26 @@ private fun OtcCarouselCard(
           .clip(CircleShape),
         contentAlignment = Alignment.Center,
       ) {
-        Text(
-          text = item.shortName,
-          color = Color.White,
-          textAlign = TextAlign.Center,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Thin,
-            fontSize = minOf(photoSize.value * 0.22f, 14f).sp,
-            lineHeight = minOf(photoSize.value * 0.24f, 16f).sp,
-          ),
-        )
+        if (imageBitmap != null) {
+          Image(
+            bitmap = imageBitmap!!,
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+          )
+        } else {
+          Text(
+            text = item.shortName,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Thin,
+              fontSize = minOf(photoSize.value * 0.22f, 14f).sp,
+              lineHeight = minOf(photoSize.value * 0.24f, 16f).sp,
+            ),
+          )
+        }
       }
 
       Text(
@@ -2493,7 +2840,7 @@ private fun OtcCarouselCard(
       )
 
       Text(
-        text = "₹ ${item.price}",
+        text = "\u20B9 ${item.price}",
         modifier = Modifier.fillMaxWidth(),
         textAlign = TextAlign.Center,
         style = TextStyle(
@@ -2545,48 +2892,33 @@ fun OpenCartScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
-    val brandTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
-    val openCartTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
-
+    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
     Column(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .padding(horizontal = 24.dp, vertical = 16.dp),
+        .padding(
+          start = horizontalPadding,
+          top = OtcOpenCartContentTopPadding,
+          end = horizontalPadding,
+          bottom = OtcPageVerticalPadding,
+        ),
       verticalArrangement = Arrangement.spacedBy(12.dp),
       horizontalAlignment = Alignment.Start,
     ) {
-      Spacer(modifier = Modifier.height(openCartTopSpace))
-
-      OpenCartHeader(
-        textSize = brandTextSize,
-        markSize = brandMarkSize,
-        onBack = onBack,
-        onOpenSavedDeals = onOpenSavedDeals,
-      )
-
-      Text(
-        text = "Open cart",
-        color = AccentGreen,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 28.sp,
-        ),
-      )
-
       CompactDetailCard(fontFamily = fontFamily) {
         LabeledInputCompactRow(
           label = "Client",
+          labelImageRes = R.drawable.open_cart_client,
           value = clientName,
           onValueChange = onClientNameChange,
           fontFamily = fontFamily,
         )
         LabeledInputCompactRow(
           label = "Phone",
+          labelImageRes = R.drawable.open_cart_phone,
           value = clientPhone,
           onValueChange = onClientPhoneChange,
           fontFamily = fontFamily,
@@ -2594,12 +2926,14 @@ fun OpenCartScreen(
         )
         LabeledInputCompactRow(
           label = "Client ID",
+          labelImageRes = R.drawable.open_cart_client_id,
           value = clientId,
           onValueChange = onClientIdChange,
           fontFamily = fontFamily,
         )
         LabeledInputCompactRow(
           label = "Transaction code",
+          labelImageRes = R.drawable.open_cart_transaction_code,
           value = transactionCode,
           onValueChange = onTransactionCodeChange,
           fontFamily = fontFamily,
@@ -2612,11 +2946,11 @@ fun OpenCartScreen(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         LabeledReadOnlyCard(
-          label = "Amount",
-          value = "₹ ${formatAmount(totalMrp)}",
+          label = "",
+          value = "\u20B9 ${formatAmount(totalMrp)}",
           fontFamily = fontFamily,
           modifier = Modifier.weight(1f),
-          valueFontSize = 30.sp,
+          valueFontSize = 48.sp,
         )
         ActionButtonCard(
           title = "Proceed to Payment",
@@ -2722,6 +3056,15 @@ fun OpenCartScreen(
       )
     }
 
+    OpenCartHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+      onBack = onBack,
+      onOpenSavedDeals = onOpenSavedDeals,
+    )
+
     if (showPaymentGateway) {
       PaymentGatewayDialog(
         totalAmount = totalMrp,
@@ -2747,7 +3090,6 @@ fun OpenCartScreen(
 fun SavedDealsScreen(
   deals: List<SavedDeal>,
   onBack: () -> Unit,
-  onOpenOtc: () -> Unit,
   onClearCart: () -> Unit,
   onUpdateDealInfo: (String, String, String, String, String) -> Unit,
 ) {
@@ -2780,49 +3122,27 @@ fun SavedDealsScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 48.dp, 980.dp)
-    val brandTextSize = if (maxWidth > 700.dp) 51.sp else 42.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 108.dp else 84.dp
-    val closedTopSpace = if (maxHeight > 760.dp) 8.dp else 4.dp
-
+    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
     LazyColumn(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .padding(horizontal = 24.dp, vertical = 16.dp),
+        .padding(
+          start = horizontalPadding,
+          top = OtcClosedContentTopPadding,
+          end = horizontalPadding,
+          bottom = OtcPageVerticalPadding,
+        ),
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-      item {
-        Spacer(modifier = Modifier.height(closedTopSpace))
-      }
-
-      item {
-        SavedDealsHeader(
-          textSize = brandTextSize,
-          markSize = brandMarkSize,
-          onBack = onBack,
-          onOpenOtc = onOpenOtc,
-        )
-      }
-
-      item {
-        Text(
-          text = "Closed",
-          color = AccentGreen,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 28.sp,
-          ),
-        )
-      }
-
       item {
         SearchInventoryField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
           fontFamily = fontFamily,
+          placeholder = "",
         )
       }
 
@@ -2844,29 +3164,27 @@ fun SavedDealsScreen(
         }
       }
     }
+
+    SavedDealsHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+      onBack = onBack,
+    )
   }
 }
 
 @Composable
 private fun OpenCartHeader(
-  textSize: androidx.compose.ui.unit.TextUnit,
-  markSize: Dp,
+  modifier: Modifier = Modifier,
   onBack: () -> Unit,
   onOpenSavedDeals: () -> Unit,
 ) {
-  TopBrandBar(
-    textSize = textSize,
-    markSize = markSize,
+  OtcActionOnlyHeader(
+    modifier = modifier,
     onBack = onBack,
-    alignStart = true,
-    logoMaxWidth = 360.dp,
-    actionButtonSize = OtcHeaderActionSize,
-    actionIconSize = OtcHeaderIconSize,
-    actionSpacing = 12.dp,
-    logoTopOffset = LockedHeaderLogoTopOffset,
-    actionBorderColor = Accent,
-    actionBorderWidth = 2.dp,
-    countBadge = {
+    middleAction = {
       CircleIconAction(
         size = OtcHeaderActionSize,
         borderColor = Accent,
@@ -2887,7 +3205,7 @@ private fun OpenCartRowItemPickerDialog(
   onDismiss: () -> Unit,
   onAddItems: (List<CartProductItem>) -> Unit,
 ) {
-  val catalog = remember { otcCatalog() }
+  val catalog = otcCatalog()
   var activeItemId by remember { mutableStateOf<String?>(null) }
   var draftQuantity by remember { mutableStateOf("1") }
   val quantities = remember { mutableStateMapOf<String, Int>() }
@@ -2903,6 +3221,7 @@ private fun OpenCartRowItemPickerDialog(
       mrp = item.price.toIntOrNull() ?: 0,
       landingPrice = item.landingPrice.toIntOrNull() ?: 0,
       quantity = quantity,
+      imageUri = item.imageUri,
     )
   }
   val totalAmount = selectedCartItems.sumOf { it.mrp * it.quantity }
@@ -3103,34 +3422,12 @@ private fun OpenCartRowItemPickerDialog(
 
 @Composable
 private fun SavedDealsHeader(
-  textSize: androidx.compose.ui.unit.TextUnit,
-  markSize: Dp,
+  modifier: Modifier = Modifier,
   onBack: () -> Unit,
-  onOpenOtc: () -> Unit,
 ) {
-  TopBrandBar(
-    textSize = textSize,
-    markSize = markSize,
+  OtcActionOnlyHeader(
+    modifier = modifier,
     onBack = onBack,
-    alignStart = true,
-    logoMaxWidth = 360.dp,
-    actionButtonSize = OtcHeaderActionSize,
-    actionIconSize = OtcHeaderIconSize,
-    actionSpacing = 12.dp,
-    logoTopOffset = LockedHeaderLogoTopOffset,
-    actionBorderColor = Accent,
-    actionBorderWidth = 2.dp,
-    countBadge = {
-      CircleIconAction(
-        size = OtcHeaderActionSize,
-        borderColor = Accent,
-        borderWidth = 2.dp,
-        icon = {
-          ClosedPageOtcShortcutIcon()
-        },
-        onClick = onOpenOtc,
-      )
-    },
   )
 }
 
@@ -3155,6 +3452,7 @@ private fun CompactDetailCard(
 @Composable
 private fun LabeledInputCompactRow(
   label: String,
+  labelImageRes: Int? = null,
   value: String,
   onValueChange: (String) -> Unit,
   fontFamily: FontFamily,
@@ -3165,16 +3463,32 @@ private fun LabeledInputCompactRow(
     horizontalArrangement = Arrangement.spacedBy(10.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(
-      text = "$label :",
-      modifier = Modifier.width(132.dp),
-      color = Ink.copy(alpha = 0.75f),
-      style = TextStyle(
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-      ),
-    )
+    if (labelImageRes != null) {
+      Box(
+        modifier = Modifier
+          .width(132.dp)
+          .height(24.dp),
+        contentAlignment = Alignment.CenterStart,
+      ) {
+        Image(
+          painter = painterResource(labelImageRes),
+          contentDescription = label,
+          contentScale = ContentScale.Fit,
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+    } else {
+      Text(
+        text = "$label :",
+        modifier = Modifier.width(132.dp),
+        color = Ink.copy(alpha = 0.75f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 14.sp,
+        ),
+      )
+    }
     BasicTextField(
       value = value,
       onValueChange = onValueChange,
@@ -3259,28 +3573,18 @@ private fun PaymentGatewayDialog(
           markSize = 58.dp,
         )
 
-        Text(
-          text = "Payment Gateway",
-          color = AccentGreen,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 24.sp,
-          ),
-        )
-
         LabeledReadOnlyCard(
-          label = "Amount",
-          value = "₹ ${formatAmount(totalAmount)}",
+          label = "",
+          value = "\u20B9 ${formatAmount(totalAmount)}",
           fontFamily = fontFamily,
           valueFontSize = 28.sp,
         )
 
         CompactDetailCard(fontFamily = fontFamily) {
-          PaymentInfoLine("Client", clientName, fontFamily)
-          PaymentInfoLine("Phone", clientPhone, fontFamily)
-          PaymentInfoLine("Client ID", clientId, fontFamily)
-          PaymentInfoLine("Transaction code", transactionCode, fontFamily)
+          PaymentInfoLine("Client", clientName, fontFamily, labelImageRes = R.drawable.payment_client)
+          PaymentInfoLine("Phone", clientPhone, fontFamily, labelImageRes = R.drawable.payment_phone)
+          PaymentInfoLine("Client ID", clientId, fontFamily, labelImageRes = R.drawable.payment_client_id)
+          PaymentInfoLine("Transaction code", transactionCode, fontFamily, labelImageRes = R.drawable.payment_transaction_id)
         }
 
         Surface(
@@ -3347,18 +3651,37 @@ private fun PaymentInfoLine(
   label: String,
   value: String,
   fontFamily: FontFamily,
+  labelImageRes: Int? = null,
+  labelTint: Color? = null,
 ) {
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(10.dp),
     verticalAlignment = Alignment.Top,
   ) {
-    Text(
-      text = "$label :",
-      modifier = Modifier.width(132.dp),
-      color = Ink.copy(alpha = 0.75f),
-      style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
-    )
+    if (labelImageRes != null) {
+      Box(
+        modifier = Modifier
+          .width(132.dp)
+          .height(24.dp),
+        contentAlignment = Alignment.CenterStart,
+      ) {
+        Image(
+          painter = painterResource(labelImageRes),
+          contentDescription = label,
+          contentScale = ContentScale.Fit,
+          colorFilter = labelTint?.let { ColorFilter.tint(it) },
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+    } else {
+      Text(
+        text = "$label :",
+        modifier = Modifier.width(132.dp),
+        color = Ink.copy(alpha = 0.75f),
+        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
+      )
+    }
     Text(
       text = value.ifBlank { "-" },
       color = Ink,
@@ -3510,14 +3833,10 @@ private fun OpenCartDealRow(
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
               contentAlignment = Alignment.Center,
             ) {
-              Text(
-                text = "+/-",
-                color = Accent,
-                style = TextStyle(
-                  fontFamily = fontFamily,
-                  fontWeight = FontWeight.Normal,
-                  fontSize = 14.sp,
-                ),
+              Image(
+                painter = painterResource(R.drawable.open_cart_edit),
+                contentDescription = "Edit row",
+                modifier = Modifier.size(28.dp),
               )
             }
           }
@@ -3536,7 +3855,7 @@ private fun OpenCartDealRow(
               Image(
                 painter = painterResource(R.drawable.icon_calculator_money),
                 contentDescription = "Open checkout calculator",
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(32.dp),
               )
             }
           }
@@ -3706,11 +4025,6 @@ private fun CheckoutAdjustmentsDialog(
               text = row.title.ifBlank { "Checkout" },
               color = AccentGreen,
               style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
-            )
-            Text(
-              text = "Adjust this info container amount",
-              color = Accent,
-              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
             )
           }
           CircleIconAction(
@@ -3934,7 +4248,7 @@ fun CheckoutScreen(
         actionIconSize = LockedHeaderIconSize,
         actionSpacing = LockedHeaderActionSpacing,
         logoTopOffset = LockedHeaderLogoTopOffset,
-        countBadge = {
+        middleAction = {
           CircleIconAction(
             size = LockedHeaderActionSize,
             icon = {
@@ -4023,6 +4337,7 @@ private fun CartItemThumbnail(
   fontFamily: FontFamily,
   onClick: () -> Unit,
 ) {
+  val imageBitmap by rememberDecodedImage(item.imageUri)
   Column(
     modifier = Modifier.width(84.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
@@ -4036,12 +4351,21 @@ private fun CartItemThumbnail(
         .clickable(onClick = onClick),
       contentAlignment = Alignment.Center,
     ) {
-      Text(
-        text = item.shortName,
-        color = Color.White,
-        textAlign = TextAlign.Center,
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 14.sp),
-      )
+      if (imageBitmap != null) {
+        Image(
+          bitmap = imageBitmap!!,
+          contentDescription = item.name,
+          contentScale = ContentScale.Crop,
+          modifier = Modifier.fillMaxSize(),
+        )
+      } else {
+        Text(
+          text = item.shortName,
+          color = Color.White,
+          textAlign = TextAlign.Center,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 14.sp),
+        )
+      }
     }
     Text(
       text = item.name,
@@ -4074,6 +4398,7 @@ private fun CartItemEditorDialog(
   onDelete: () -> Unit,
 ) {
   var quantity by remember(item.id, item.quantity) { mutableStateOf(item.quantity.toString()) }
+  val resolvedQuantity = quantity.toIntOrNull()?.coerceIn(1, 99) ?: 1
 
   Dialog(onDismissRequest = onDismiss) {
     Surface(
@@ -4083,82 +4408,80 @@ private fun CartItemEditorDialog(
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
-      Column(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-      ) {
-        Text(
-          text = item.name,
-          color = Ink,
-          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
+      Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp)) {
+        CircleIconAction(
+          modifier = Modifier.align(Alignment.TopEnd),
+          size = 42.dp,
+          icon = {
+            Icon(
+              imageVector = Icons.Filled.Close,
+              contentDescription = "Delete item",
+              tint = Accent,
+            )
+          },
+          onClick = onDelete,
         )
-        Text(
-          text = "Delete Item",
-          color = Accent,
-          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
-        )
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            QuantityButton(
-              text = "-",
-              onClick = {
-                val next = ((quantity.toIntOrNull() ?: item.quantity) - 1).coerceAtLeast(1)
-                quantity = next.toString()
-                onQuantityChange(next)
-              },
-              fontFamily = fontFamily,
-            )
-            BasicTextField(
-              value = quantity,
-              onValueChange = {
-                val clean = it.filter(Char::isDigit)
-                quantity = clean.ifBlank { "1" }
-                onQuantityChange(quantity.toIntOrNull() ?: 1)
-              },
-              modifier = Modifier.width(48.dp),
-              singleLine = true,
-              cursorBrush = SolidColor(Accent),
-              textStyle = TextStyle(
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 26.sp,
-                textAlign = TextAlign.Center,
-                color = Ink,
-              ),
-            )
-            QuantityButton(
-              text = "+",
-              onClick = {
-                val next = ((quantity.toIntOrNull() ?: item.quantity) + 1).coerceAtMost(99)
-                quantity = next.toString()
-                onQuantityChange(next)
-              },
-              fontFamily = fontFamily,
-            )
-          }
 
-          Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+          verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+          Text(
+            text = item.name,
+            color = Ink,
+            style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
+          )
+          Text(
+            text = "Delete Item",
+            color = Accent,
+            style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
+          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
           ) {
-            CircleIconAction(
-              size = 42.dp,
-              icon = {
-                Icon(
-                  imageVector = Icons.Filled.Close,
-                  contentDescription = "Delete item",
-                  tint = Accent,
-                )
-              },
-              onClick = onDelete,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              QuantityButton(
+                text = "-",
+                onClick = {
+                  val next = (resolvedQuantity - 1).coerceAtLeast(1)
+                  quantity = next.toString()
+                },
+                fontFamily = fontFamily,
+              )
+              BasicTextField(
+                value = quantity,
+                onValueChange = {
+                  val clean = it.filter(Char::isDigit)
+                  quantity = clean.ifBlank { "1" }
+                },
+                modifier = Modifier.width(48.dp),
+                singleLine = true,
+                cursorBrush = SolidColor(Accent),
+                textStyle = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 26.sp,
+                  textAlign = TextAlign.Center,
+                  color = Ink,
+                ),
+              )
+              QuantityButton(
+                text = "+",
+                onClick = {
+                  val next = (resolvedQuantity + 1).coerceAtMost(99)
+                  quantity = next.toString()
+                },
+                fontFamily = fontFamily,
+              )
+            }
+
             CircleIconAction(
               size = 42.dp,
               icon = {
@@ -4168,7 +4491,10 @@ private fun CartItemEditorDialog(
                   tint = AccentGreen,
                 )
               },
-              onClick = onDismiss,
+              onClick = {
+                onQuantityChange(resolvedQuantity)
+                onDismiss()
+              },
             )
           }
         }
@@ -4334,14 +4660,14 @@ private fun ClosedDealCartDialog(
         }
 
         CompactDetailCard(fontFamily = fontFamily) {
-          PaymentInfoLine("Client", deal.clientName, fontFamily)
-          PaymentInfoLine("Phone", deal.clientPhone, fontFamily)
-          PaymentInfoLine("Client ID", deal.clientId, fontFamily)
-          PaymentInfoLine("Transaction code", deal.transactionCode, fontFamily)
+          PaymentInfoLine("Client", deal.clientName, fontFamily, labelImageRes = R.drawable.closed_deal_user, labelTint = Accent)
+          PaymentInfoLine("Phone", deal.clientPhone, fontFamily, labelImageRes = R.drawable.closed_deal_phone, labelTint = Accent)
+          PaymentInfoLine("Client ID", deal.clientId, fontFamily, labelImageRes = R.drawable.closed_deal_client_id, labelTint = Accent)
+          PaymentInfoLine("Transaction code", deal.transactionCode, fontFamily, labelImageRes = R.drawable.closed_deal_transaction_id, labelTint = Accent)
         }
 
         LabeledReadOnlyCard(
-          label = "Amount",
+          label = "",
           value = "\u20B9 ${formatAmount(totalAmount)}",
           fontFamily = fontFamily,
           valueFontSize = 28.sp,
@@ -4482,30 +4808,33 @@ private fun SavedDealClientSection(
       modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Text(
-        text = "Client :",
-        color = Accent,
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
-      )
-      InlineEditableText(
+      SavedDealClientField(
+        label = "Client",
+        labelImageRes = R.drawable.closed_deal_user,
         value = deal.clientName,
         placeholder = "Client name",
         fontFamily = fontFamily,
         onValueChange = { onDealInfoChange(deal.id, it, deal.clientPhone, deal.clientId, deal.transactionCode) },
       )
-      InlineEditableText(
+      SavedDealClientField(
+        label = "Phone",
+        labelImageRes = R.drawable.closed_deal_phone,
         value = deal.clientPhone,
         placeholder = "Phone number",
         fontFamily = fontFamily,
         onValueChange = { onDealInfoChange(deal.id, deal.clientName, it.filter(Char::isDigit), deal.clientId, deal.transactionCode) },
       )
-      InlineEditableText(
+      SavedDealClientField(
+        label = "Client ID",
+        labelImageRes = R.drawable.closed_deal_client_id,
         value = deal.clientId,
         placeholder = "Client ID",
         fontFamily = fontFamily,
         onValueChange = { onDealInfoChange(deal.id, deal.clientName, deal.clientPhone, it, deal.transactionCode) },
       )
-      InlineEditableText(
+      SavedDealClientField(
+        label = "Transaction code",
+        labelImageRes = R.drawable.closed_deal_transaction_id,
         value = deal.transactionCode,
         placeholder = "Transaction Code",
         fontFamily = fontFamily,
@@ -4516,15 +4845,55 @@ private fun SavedDealClientSection(
 }
 
 @Composable
-private fun InlineEditableText(
+private fun SavedDealClientField(
+  label: String,
+  labelImageRes: Int,
   value: String,
   placeholder: String,
   fontFamily: FontFamily,
   onValueChange: (String) -> Unit,
 ) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
+      modifier = Modifier
+        .width(28.dp)
+        .height(28.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Image(
+        painter = painterResource(labelImageRes),
+        contentDescription = label,
+        contentScale = ContentScale.Fit,
+        colorFilter = ColorFilter.tint(Accent),
+        modifier = Modifier.fillMaxSize(),
+      )
+    }
+    InlineEditableText(
+      value = value,
+      placeholder = placeholder,
+      fontFamily = fontFamily,
+      onValueChange = onValueChange,
+      modifier = Modifier.weight(1f),
+    )
+  }
+}
+
+@Composable
+private fun InlineEditableText(
+  value: String,
+  placeholder: String,
+  fontFamily: FontFamily,
+  onValueChange: (String) -> Unit,
+  modifier: Modifier = Modifier,
+) {
   BasicTextField(
     value = value,
     onValueChange = onValueChange,
+    modifier = modifier,
     singleLine = true,
     cursorBrush = SolidColor(Accent),
     textStyle = TextStyle(
@@ -4800,28 +5169,21 @@ private fun CheckoutSummaryPopup(
 @Composable
 private fun MediaGalleryPopup(
   mediaUris: List<String>,
+  productName: String,
+  primaryTitle: String,
+  onPrimaryTitleChange: (String) -> Unit,
+  primaryDescription: String,
+  onPrimaryDescriptionChange: (String) -> Unit,
+  secondaryTitle: String,
+  onSecondaryTitleChange: (String) -> Unit,
+  secondaryDescription: String,
+  onSecondaryDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onContactTextChange: (String) -> Unit,
   fontFamily: FontFamily,
   onAddFromDrive: () -> Unit,
   onClose: () -> Unit,
 ) {
-  val context = LocalContext.current
-  var currentIndex by rememberSaveable { mutableIntStateOf(0) }
-  val sliderState = rememberLazyListState()
-  val safeIndex = currentIndex.coerceIn(0, (mediaUris.lastIndex).coerceAtLeast(0))
-  val currentUri = mediaUris.getOrNull(safeIndex)
-  val showNavigationButtons = mediaUris.size > 1 && safeIndex > 0
-  val canGoBack = safeIndex > 0
-  val canGoForward = safeIndex < mediaUris.lastIndex
-
-  LaunchedEffect(mediaUris.size) {
-    if (mediaUris.isNotEmpty()) {
-      sliderState.scrollToItem(mediaUris.lastIndex + 1)
-      if (currentIndex > mediaUris.lastIndex) {
-        currentIndex = mediaUris.lastIndex
-      }
-    }
-  }
-
   Dialog(onDismissRequest = onClose) {
     Surface(
       modifier = Modifier.fillMaxWidth(0.96f),
@@ -4831,7 +5193,9 @@ private fun MediaGalleryPopup(
       shadowElevation = 0.dp,
     ) {
       Column(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+        modifier = Modifier
+          .padding(horizontal = 18.dp, vertical = 18.dp)
+          .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         Row(
@@ -4861,95 +5225,1091 @@ private fun MediaGalleryPopup(
           )
         }
 
-        if (currentUri == null) {
-          Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            EmptyStateCard(
-              text = "No media added yet. Use the + tile below to add images from Google Drive.",
-              fontFamily = fontFamily,
+        GalleryScreen(
+          mediaUris = mediaUris,
+          onClose = onClose,
+          onAddFromDrive = onAddFromDrive,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun GalleryScreen(
+  mediaUris: List<String>,
+  onClose: () -> Unit,
+  onAddFromDrive: () -> Unit,
+) {
+  val context = LocalContext.current
+  val galleryImages = remember(mediaUris) {
+    mediaUris.mapIndexed { index, uri ->
+      GalleryImageItem(
+        id = "gallery-$index-$uri",
+        uriString = uri,
+      )
+    }
+  }
+  var selectedImages by rememberSaveable(mediaUris) { mutableStateOf(emptyList<String>()) }
+  var isSheetOpen by rememberSaveable(mediaUris) { mutableStateOf(false) }
+  val variant = remember { AppExperimentManager.galleryShareSheetVariant() }
+  val sharePlatforms = remember {
+    listOf(
+      SharePlatformAction("share", "Share", Icons.Filled.Share),
+      SharePlatformAction("whatsapp", "WhatsApp", Icons.AutoMirrored.Filled.Chat, "com.whatsapp"),
+      SharePlatformAction("instagram", "Instagram", Icons.Filled.PhotoCamera, "com.instagram.android"),
+      SharePlatformAction("messages", "Messages", Icons.AutoMirrored.Filled.Send, "com.google.android.apps.messaging"),
+      SharePlatformAction("more", "More", Icons.Filled.MoreHoriz),
+    )
+  }
+
+  LaunchedEffect(variant) {
+    AppExperimentManager.logGalleryVariantExposure(variant)
+  }
+
+  fun toggleSelect(image: GalleryImageItem) {
+    val nextState = applyGallerySelectionToggle(
+      currentSelection = selectedImages,
+      wasSheetOpen = isSheetOpen,
+      uriString = image.uriString,
+      variant = variant,
+    )
+    selectedImages = nextState.selectedImages
+    isSheetOpen = nextState.isSheetOpen
+  }
+
+  fun removeSelectedImage(uriString: String) {
+    val nextState = applyGallerySelectionRemoval(
+      currentSelection = selectedImages,
+      uriString = uriString,
+    )
+    selectedImages = nextState.selectedImages
+    isSheetOpen = nextState.isSheetOpen
+  }
+
+  fun clearSelection() {
+    selectedImages = emptyList()
+    isSheetOpen = false
+  }
+
+  fun openShareSheet() {
+    if (selectedImages.isNotEmpty()) {
+      isSheetOpen = true
+      AppExperimentManager.logGalleryShareSheetOpened(variant, selectedImages.size)
+    }
+  }
+
+  fun closeShareSheet() {
+    isSheetOpen = false
+  }
+
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(560.dp)
+      .background(Color.White),
+  ) {
+    Column(modifier = Modifier.fillMaxSize()) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        CircleIconAction(
+          size = 38.dp,
+          icon = {
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+              contentDescription = "Back",
+              tint = Accent,
             )
-            AddMediaThumbnailCard(
-              fontFamily = fontFamily,
-              onClick = onAddFromDrive,
+          },
+          onClick = onClose,
+        )
+        Text(
+          text = "Gallery",
+          color = Ink,
+          style = TextStyle(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp,
+          ),
+        )
+        CircleIconAction(
+          size = 38.dp,
+          icon = {
+            Icon(
+              imageVector = if (isSheetOpen) Icons.Filled.Close else Icons.Filled.AddToDrive,
+              contentDescription = if (isSheetOpen) "Close sheet" else "Add media",
+              tint = Accent,
             )
+          },
+          onClick = {
+            if (isSheetOpen) closeShareSheet() else onAddFromDrive()
+          },
+        )
+      }
+
+      if (galleryImages.isEmpty()) {
+        EmptyStateCard(
+          text = "Add product media to open the modern gallery share sheet.",
+          fontFamily = rememberDashboardFont(),
+        )
+      } else {
+        ImageGrid(
+          images = galleryImages,
+          selectedImageUris = selectedImages,
+          onImageTap = ::toggleSelect,
+          modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f),
+        )
+      }
+    }
+
+    if (isSheetOpen) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color.Black.copy(alpha = 0.24f))
+          .clickable(
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() },
+            onClick = ::closeShareSheet,
+          ),
+      )
+    }
+
+    if (variant == GalleryShareSheetVariant.ManualOpen && selectedImages.isNotEmpty() && !isSheetOpen) {
+      Surface(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 18.dp)
+          .clickable(onClick = ::openShareSheet),
+        shape = CircleShape,
+        color = Accent,
+        tonalElevation = 0.dp,
+        shadowElevation = 10.dp,
+      ) {
+        Text(
+          text = "Share ${selectedImages.size} selected",
+          modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+          color = Color.White,
+          style = TextStyle(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+          ),
+        )
+      }
+    }
+
+    if (selectedImages.isNotEmpty()) {
+      BottomShareSheet(
+        selectedImages = selectedImages,
+        isOpen = isSheetOpen,
+        platforms = sharePlatforms,
+        onClose = ::closeShareSheet,
+        onRemoveImage = ::removeSelectedImage,
+        onClearSelection = ::clearSelection,
+        onShareSelectedImages = { platform ->
+          AppExperimentManager.logGalleryShareAction(variant, platform.id, selectedImages.size)
+          shareSelectedImages(context, selectedImages, platform)
+        },
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
+    }
+  }
+}
+
+@Composable
+private fun ImageGrid(
+  images: List<GalleryImageItem>,
+  selectedImageUris: List<String>,
+  onImageTap: (GalleryImageItem) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(3),
+    modifier = modifier,
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    items(images, key = { it.id }) { image ->
+      GalleryImageTile(
+        image = image,
+        selected = image.uriString in selectedImageUris,
+        onTap = { onImageTap(image) },
+      )
+    }
+  }
+}
+
+@Composable
+private fun GalleryImageTile(
+  image: GalleryImageItem,
+  selected: Boolean,
+  onTap: () -> Unit,
+) {
+  val bitmap by rememberDecodedImage(image.uriString.takeUnless { isVideoUri(LocalContext.current, it) }, maxDimensionPx = 720)
+  Box(
+    modifier = Modifier
+      .aspectRatio(1f)
+      .clip(CardShape)
+      .background(Color(0xFFF0F0F0))
+      .clickable(onClick = onTap),
+  ) {
+    if (bitmap != null) {
+      Image(
+        bitmap = bitmap!!,
+        contentDescription = "Gallery image",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+      )
+    } else {
+      Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Filled.PhotoCamera,
+          contentDescription = null,
+          tint = Ink.copy(alpha = 0.4f),
+        )
+      }
+    }
+
+    if (selected) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(8.dp)
+          .size(24.dp)
+          .background(Color(0xFF2F80ED), CircleShape),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Filled.Check,
+          contentDescription = "Selected",
+          tint = Color.White,
+          modifier = Modifier.size(16.dp),
+        )
+      }
+    } else {
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(8.dp)
+          .size(24.dp)
+          .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+      )
+    }
+  }
+}
+
+@Composable
+private fun BottomShareSheet(
+  selectedImages: List<String>,
+  isOpen: Boolean,
+  platforms: List<SharePlatformAction>,
+  onClose: () -> Unit,
+  onRemoveImage: (String) -> Unit,
+  onClearSelection: () -> Unit,
+  onShareSelectedImages: (SharePlatformAction) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val offsetY by animateDpAsState(
+    targetValue = if (isOpen) 0.dp else 260.dp,
+    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+    label = "share-sheet-offset",
+  )
+
+  Surface(
+    modifier = modifier
+      .fillMaxWidth()
+      .offset(y = offsetY),
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 14.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.CenterHorizontally)
+          .width(42.dp)
+          .height(4.dp)
+          .background(Color(0xFFD9D9D9), CircleShape),
+      )
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+      ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(
+            text = "${selectedImages.size} Selected",
+            color = Ink,
+            style = TextStyle(
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 18.sp,
+            ),
+          )
+          Text(
+            text = "Swipe up for more options",
+            color = Ink.copy(alpha = 0.55f),
+            style = TextStyle(
+              fontWeight = FontWeight.Normal,
+              fontSize = 13.sp,
+            ),
+          )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          TextButton(onClick = onClearSelection) {
+            Text("Clear", color = Accent)
           }
-        } else {
-          Box(modifier = Modifier.fillMaxWidth()) {
-            MediaViewerCard(
-              uriString = currentUri,
-              fontFamily = fontFamily,
-              modifier = Modifier.fillMaxWidth(),
-              onShare = { shareMediaUri(context, currentUri) },
-              footerLabel = "${safeIndex + 1}/${mediaUris.size}",
-            )
+          CircleIconAction(
+            size = 34.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close share sheet",
+                tint = Accent,
+              )
+            },
+            onClick = onClose,
+          )
+        }
+      }
 
-            if (showNavigationButtons) {
-              Box(
-                modifier = Modifier
-                  .align(Alignment.CenterStart)
-                  .padding(start = 10.dp),
-              ) {
-                CircleIconAction(
-                  size = 44.dp,
-                  icon = {
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                      contentDescription = "Previous media",
-                      tint = Accent.copy(alpha = if (canGoBack) 1f else 0.4f),
-                    )
-                  },
-                  onClick = {
-                    if (canGoBack) currentIndex = safeIndex - 1
-                  },
-                )
-              }
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(selectedImages, key = { it }) { uriString ->
+          SelectedImagePreview(
+            uriString = uriString,
+            onRemove = { onRemoveImage(uriString) },
+          )
+        }
+      }
 
-              Box(
-                modifier = Modifier
-                  .align(Alignment.CenterEnd)
-                  .padding(end = 10.dp),
-              ) {
-                CircleIconAction(
-                  size = 44.dp,
-                  icon = {
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                      contentDescription = "Next media",
-                      tint = Accent.copy(alpha = if (canGoForward) 1f else 0.4f),
-                    )
-                  },
-                  onClick = {
-                    if (canGoForward) currentIndex = safeIndex + 1
-                  },
-                )
-              }
-            }
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+      ) {
+        platforms.forEach { platform ->
+          ShareActionButton(
+            action = platform,
+            onClick = { onShareSelectedImages(platform) },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SelectedImagePreview(
+  uriString: String,
+  onRemove: () -> Unit,
+) {
+  val bitmap by rememberDecodedImage(uriString.takeUnless { isVideoUri(LocalContext.current, it) }, maxDimensionPx = 280)
+  Box(
+    modifier = Modifier
+      .size(64.dp)
+      .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+      .background(Color(0xFFF4F4F4)),
+  ) {
+    if (bitmap != null) {
+      Image(
+        bitmap = bitmap!!,
+        contentDescription = "Selected preview",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+      )
+    }
+    Box(
+      modifier = Modifier
+        .align(Alignment.TopEnd)
+        .padding(4.dp)
+        .size(18.dp)
+        .background(Color.Black.copy(alpha = 0.58f), CircleShape)
+        .clickable(onClick = onRemove),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(
+        imageVector = Icons.Filled.Close,
+        contentDescription = "Remove selected image",
+        tint = Color.White,
+        modifier = Modifier.size(12.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun ShareActionButton(
+  action: SharePlatformAction,
+  onClick: () -> Unit,
+) {
+  Column(
+    modifier = Modifier.clickable(onClick = onClick),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Box(
+      modifier = Modifier
+        .size(52.dp)
+        .background(Color(0xFFF5F5F7), CircleShape),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(
+        imageVector = action.icon,
+        contentDescription = action.label,
+        tint = Accent,
+        modifier = Modifier.size(24.dp),
+      )
+    }
+    Text(
+      text = action.label,
+      color = Ink.copy(alpha = 0.82f),
+      style = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun MediaFeatureTemplateOne(
+  uriString: String?,
+  title: String,
+  onTitleChange: (String) -> Unit,
+  titlePlaceholder: String,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onContactTextChange: (String) -> Unit,
+  onAddImage: () -> Unit,
+  fontFamily: FontFamily,
+) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState()),
+    contentAlignment = Alignment.Center,
+  ) {
+    BrochurePage {
+      BrochureLogo(fontFamily = fontFamily)
+      ProductImage(
+        uriString = uriString,
+        containerX = 108.dp,
+        containerY = 167.dp,
+        containerWidth = 197.dp,
+        containerHeight = 148.dp,
+        contentScale = ContentScale.Fit,
+        showWhiteBackground = true,
+        addButtonLabel = "Add image",
+        onAddImage = onAddImage,
+      )
+      TitleText(
+        value = title,
+        onValueChange = onTitleChange,
+        placeholder = if (titlePlaceholder.isBlank()) "Pine Bonsai" else titlePlaceholder,
+        modifier = Modifier
+          .offset(x = 137.dp, y = 356.dp)
+          .width(139.dp)
+          .height(34.dp),
+        fontFamily = fontFamily,
+      )
+      BodyDescription(
+        value = description,
+        onValueChange = onDescriptionChange,
+        placeholder = "A premium bonsai statement piece with refined character and timeless calm.",
+        modifier = Modifier
+          .offset(x = 43.dp, y = 392.dp)
+          .width(327.dp)
+          .height(41.dp),
+        fontFamily = fontFamily,
+      )
+      ContactNumber(
+        value = contactText,
+        onValueChange = onContactTextChange,
+        placeholder = "+91 78085 80855",
+        modifier = Modifier
+          .offset(x = 123.dp, y = 472.dp)
+          .width(167.dp)
+          .height(19.dp),
+        fontFamily = fontFamily,
+      )
+    }
+  }
+}
+
+@Composable
+private fun MediaFeatureTemplateTwo(
+  uriString: String?,
+  title: String,
+  onTitleChange: (String) -> Unit,
+  titlePlaceholder: String,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onContactTextChange: (String) -> Unit,
+  onAddImage: () -> Unit,
+  fontFamily: FontFamily,
+) {
+  var activeIconIds by rememberSaveable { mutableStateOf(listOf<Int>()) }
+
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState()),
+    contentAlignment = Alignment.Center,
+  ) {
+    BrochurePage {
+      BrochureLogo(fontFamily = fontFamily)
+      ProductImage(
+        uriString = uriString,
+        containerX = 42.dp,
+        containerY = 82.dp,
+        containerWidth = 329.dp,
+        containerHeight = 165.dp,
+        contentScale = ContentScale.Crop,
+        showWhiteBackground = false,
+        addButtonLabel = "Add image",
+        onAddImage = onAddImage,
+      )
+      CareIconsGroup(
+        modifier = Modifier
+          .offset(x = 144.dp, y = 278.dp)
+          .width(125.dp)
+          .height(47.dp),
+        activeIconIds = activeIconIds,
+        onToggleIcon = { iconId ->
+          activeIconIds = if (iconId in activeIconIds) {
+            activeIconIds - iconId
+          } else {
+            activeIconIds + iconId
           }
+        },
+      )
+      TitleText(
+        value = title,
+        onValueChange = onTitleChange,
+        placeholder = if (titlePlaceholder.isBlank()) "Pine Bonsai / care" else titlePlaceholder,
+        modifier = Modifier
+          .offset(x = 98.dp, y = 356.dp)
+          .width(218.dp)
+          .height(35.dp),
+        fontFamily = fontFamily,
+      )
+      BodyDescription(
+        value = description,
+        onValueChange = onDescriptionChange,
+        placeholder = "Place in bright, indirect light and water with care for a balanced, lasting display.",
+        modifier = Modifier
+          .offset(x = 50.dp, y = 392.dp)
+          .width(314.dp)
+          .height(55.dp),
+        fontFamily = fontFamily,
+      )
+      ContactNumber(
+        value = contactText,
+        onValueChange = onContactTextChange,
+        placeholder = "+91 78085 80855",
+        modifier = Modifier
+          .offset(x = 123.dp, y = 486.dp)
+          .width(167.dp)
+          .height(19.dp),
+        fontFamily = fontFamily,
+      )
+    }
+  }
+}
 
-          LazyRow(
-            state = sliderState,
+@Composable
+private fun BrochurePage(
+  modifier: Modifier = Modifier,
+  content: @Composable BoxScope.() -> Unit,
+) {
+  Surface(
+    modifier = modifier
+      .width(413.dp)
+      .height(531.dp),
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Box(modifier = Modifier.fillMaxSize(), content = content)
+  }
+}
+
+@Composable
+private fun BrochureLogo(
+  fontFamily: FontFamily,
+) {
+  AshokvatikaLogo(
+    modifier = Modifier
+      .offset(x = 42.dp, y = 14.dp)
+      .width(112.dp),
+    textSize = 19.sp,
+    markSize = 24.dp,
+    fixedHeight = 27.dp,
+  )
+}
+
+@Composable
+private fun ProductImage(
+  uriString: String?,
+  containerX: Dp,
+  containerY: Dp,
+  containerWidth: Dp,
+  containerHeight: Dp,
+  contentScale: ContentScale,
+  showWhiteBackground: Boolean,
+  addButtonLabel: String,
+  onAddImage: () -> Unit,
+) {
+  val imageBitmap by rememberDecodedImage(uriString, maxDimensionPx = 1600)
+
+  Box(
+    modifier = Modifier
+      .offset(x = containerX, y = containerY)
+      .width(containerWidth)
+      .height(containerHeight)
+      .background(if (showWhiteBackground) Color.White else Color(0xFFF1ECE4)),
+    contentAlignment = Alignment.Center,
+  ) {
+    if (imageBitmap != null) {
+      Image(
+        bitmap = imageBitmap!!,
+        contentDescription = "Brochure product image",
+        contentScale = contentScale,
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(if (contentScale == ContentScale.Fit) 4.dp else 0.dp),
+      )
+    } else {
+      Surface(
+        modifier = Modifier.clickable(onClick = onAddImage),
+        shape = CardShape,
+        color = Accent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = addButtonLabel,
+            tint = Color.White,
+            modifier = Modifier.size(18.dp),
+          )
+          Text(
+            text = addButtonLabel,
+            color = Color.White,
+            style = TextStyle(
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 14.sp,
+            ),
+          )
+        }
+      }
+    }
+
+    if (imageBitmap != null) {
+      Surface(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 6.dp)
+          .clickable(onClick = onAddImage),
+        shape = CardShape,
+        color = Color.White.copy(alpha = 0.96f),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Text(
+          text = "Change image",
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          color = Accent,
+          style = TextStyle(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+          ),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun TitleText(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  modifier: Modifier,
+  fontFamily: FontFamily,
+) {
+  Box(
+    modifier = modifier,
+    contentAlignment = Alignment.Center,
+  ) {
+    TemplateEditableText(
+      value = value,
+      onValueChange = onValueChange,
+      placeholder = placeholder,
+      fontFamily = fontFamily,
+      textAlign = TextAlign.Center,
+      fontSize = 25.sp,
+      color = Color(0xFFAAA395),
+      lineHeight = 29.sp,
+      letterSpacing = (-0.2).sp,
+      fontWeight = FontWeight.SemiBold,
+    )
+  }
+}
+
+@Composable
+private fun BodyDescription(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  modifier: Modifier,
+  fontFamily: FontFamily,
+) {
+  Box(
+    modifier = modifier,
+    contentAlignment = Alignment.TopCenter,
+  ) {
+    TemplateEditableText(
+      value = value,
+      onValueChange = onValueChange,
+      placeholder = placeholder,
+      fontFamily = fontFamily,
+      textAlign = TextAlign.Center,
+      fontSize = 10.5.sp,
+      color = Color(0xFF564F47),
+      lineHeight = 14.5.sp,
+      minLines = 3,
+      fontWeight = FontWeight.Medium,
+    )
+  }
+}
+
+@Composable
+private fun ContactNumber(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  modifier: Modifier,
+  fontFamily: FontFamily,
+) {
+  Box(
+    modifier = modifier,
+    contentAlignment = Alignment.Center,
+  ) {
+    TemplateEditableText(
+      value = value,
+      onValueChange = onValueChange,
+      placeholder = placeholder,
+      fontFamily = fontFamily,
+      textAlign = TextAlign.Center,
+      fontSize = 14.5.sp,
+      color = Color(0xFF6A625A),
+      lineHeight = 18.sp,
+      letterSpacing = 0.sp,
+      fontWeight = FontWeight.SemiBold,
+    )
+  }
+}
+
+@Composable
+private fun CareIconsGroup(
+  modifier: Modifier = Modifier,
+  activeIconIds: List<Int>,
+  onToggleIcon: (Int) -> Unit,
+) {
+  Row(
+    modifier = modifier,
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    EditableCareIcon(
+      iconId = 0,
+      active = 0 in activeIconIds,
+      icon = Icons.Filled.WbSunny,
+      onClick = { onToggleIcon(0) },
+      modifier = Modifier.weight(1f),
+    )
+    EditableCareIcon(
+      iconId = 1,
+      active = 1 in activeIconIds,
+      icon = Icons.Filled.Cloud,
+      onClick = { onToggleIcon(1) },
+      modifier = Modifier.weight(1f),
+    )
+    EditableCareIcon(
+      iconId = 2,
+      active = 2 in activeIconIds,
+      icon = Icons.Filled.Home,
+      onClick = { onToggleIcon(2) },
+      modifier = Modifier.weight(1f),
+    )
+  }
+}
+
+@Composable
+private fun EditableCareIcon(
+  iconId: Int,
+  active: Boolean,
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val tint = if (active) Color(0xFFD9822B) else Color(0xFFB7AA98)
+  Column(
+    modifier = modifier.clickable(onClick = onClick),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
+  ) {
+    Icon(
+      imageVector = icon,
+      contentDescription = "Care icon $iconId",
+      tint = tint,
+      modifier = Modifier.size(22.dp),
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+      Icon(
+        imageVector = Icons.Filled.WaterDrop,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(10.dp),
+      )
+      Icon(
+        imageVector = Icons.Filled.WaterDrop,
+        contentDescription = null,
+        tint = tint.copy(alpha = 0.9f),
+        modifier = Modifier.size(10.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun MediaFeatureTemplateThree(
+  primaryUri: String?,
+  secondaryUri: String?,
+  primaryTitle: String,
+  onPrimaryTitleChange: (String) -> Unit,
+  primaryTitlePlaceholder: String,
+  primaryDescription: String,
+  onPrimaryDescriptionChange: (String) -> Unit,
+  secondaryTitle: String,
+  onSecondaryTitleChange: (String) -> Unit,
+  secondaryTitlePlaceholder: String,
+  secondaryDescription: String,
+  onSecondaryDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onContactTextChange: (String) -> Unit,
+  fontFamily: FontFamily,
+) {
+  TemplatePreviewCard {
+    TemplateBrandHeader(
+      fontFamily = fontFamily,
+      contactText = contactText,
+      onContactTextChange = onContactTextChange,
+      editableContact = true,
+    )
+    Spacer(modifier = Modifier.height(18.dp))
+    StackedTemplateRow(
+      uriString = primaryUri,
+      title = primaryTitle,
+      onTitleChange = onPrimaryTitleChange,
+      titlePlaceholder = primaryTitlePlaceholder,
+      description = primaryDescription,
+      onDescriptionChange = onPrimaryDescriptionChange,
+      descriptionPlaceholder = "Add concise sales copy here.",
+      fontFamily = fontFamily,
+    )
+    Spacer(modifier = Modifier.height(18.dp))
+    StackedTemplateRow(
+      uriString = secondaryUri,
+      title = secondaryTitle,
+      onTitleChange = onSecondaryTitleChange,
+      titlePlaceholder = secondaryTitlePlaceholder,
+      description = secondaryDescription,
+      onDescriptionChange = onSecondaryDescriptionChange,
+      descriptionPlaceholder = "Add care guidance here.",
+      fontFamily = fontFamily,
+    )
+  }
+}
+
+@Composable
+private fun TemplatePreviewCard(
+  content: @Composable ColumnScope.() -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = CardShape,
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      content = content,
+    )
+  }
+}
+
+@Composable
+private fun TemplateBrandHeader(
+  fontFamily: FontFamily,
+  contactText: String,
+  onContactTextChange: (String) -> Unit = {},
+  editableContact: Boolean = false,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.Top,
+  ) {
+    AshokvatikaLogo(
+      modifier = Modifier.width(154.dp),
+      textSize = 18.sp,
+      markSize = 28.dp,
+    )
+    if (contactText.isNotBlank() || editableContact) {
+      TemplateEditableText(
+        value = contactText,
+        onValueChange = onContactTextChange,
+        placeholder = if (editableContact) "+91 78085 80855" else "",
+        fontFamily = fontFamily,
+        textAlign = TextAlign.End,
+        fontSize = 14.sp,
+        color = Ink.copy(alpha = 0.8f),
+        lineHeight = 16.sp,
+        enabled = editableContact,
+      )
+    } else {
+      Spacer(modifier = Modifier.width(12.dp))
+    }
+  }
+}
+
+@Composable
+private fun TemplateMediaImage(
+  uriString: String?,
+  modifier: Modifier = Modifier,
+  rounded: Boolean = true,
+  addButtonLabel: String? = null,
+  onAddImage: (() -> Unit)? = null,
+) {
+  val imageBitmap by rememberDecodedImage(uriString, maxDimensionPx = 1400)
+  val shape = if (rounded) CardShape else androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+  Surface(
+    modifier = modifier,
+    shape = shape,
+    color = Color(0xFFE7E4DF),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    if (imageBitmap != null) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(10.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Image(
+          bitmap = imageBitmap!!,
+          contentDescription = "Template media",
+          contentScale = ContentScale.Fit,
+          modifier = Modifier.fillMaxSize(),
+        )
+        if (addButtonLabel != null && onAddImage != null) {
+          Surface(
             modifier = Modifier
-              .fillMaxWidth()
-              .height(112.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+              .align(Alignment.BottomCenter)
+              .padding(bottom = 6.dp)
+              .clickable(onClick = onAddImage),
+            shape = CardShape,
+            color = Color.White.copy(alpha = 0.94f),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
           ) {
-            item {
-              AddMediaThumbnailCard(
-                fontFamily = fontFamily,
-                onClick = onAddFromDrive,
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "Change image",
+                tint = Accent,
+                modifier = Modifier.size(16.dp),
+              )
+              Text(
+                text = "Change image",
+                color = Accent,
+                style = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
               )
             }
-
-            itemsIndexed(mediaUris) { index, uriString ->
-              MediaThumbnailCard(
-                uriString = uriString,
-                selected = index == safeIndex,
-                fontFamily = fontFamily,
-                onClick = { currentIndex = index },
-                onShare = { shareMediaUri(context, uriString) },
-              )
+          }
+        }
+      }
+    } else {
+      Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+      ) {
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Text(
+            text = "Image container",
+            textAlign = TextAlign.Center,
+            color = Ink.copy(alpha = 0.55f),
+            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+          )
+          if (addButtonLabel != null && onAddImage != null) {
+            Surface(
+              modifier = Modifier.clickable(onClick = onAddImage),
+              shape = CardShape,
+              color = Accent,
+              tonalElevation = 0.dp,
+              shadowElevation = 0.dp,
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.Add,
+                  contentDescription = addButtonLabel,
+                  tint = Color.White,
+                  modifier = Modifier.size(18.dp),
+                )
+                Text(
+                  text = addButtonLabel,
+                  color = Color.White,
+                  style = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                )
+              }
             }
           }
         }
@@ -4959,13 +6319,226 @@ private fun MediaGalleryPopup(
 }
 
 @Composable
+private fun CareIconRow() {
+  Row(
+    horizontalArrangement = Arrangement.spacedBy(22.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    TemplateCareIcon(icon = Icons.Filled.WbSunny)
+    TemplateCareIcon(icon = Icons.Filled.Cloud)
+    TemplateCareIcon(icon = Icons.Filled.Home)
+  }
+}
+
+@Composable
+private fun TemplateCareIcon(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
+  Column(
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Icon(
+      imageVector = icon,
+      contentDescription = null,
+      tint = Ink.copy(alpha = 0.42f),
+      modifier = Modifier.size(28.dp),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+      Icon(
+        imageVector = Icons.Filled.WaterDrop,
+        contentDescription = null,
+        tint = Ink.copy(alpha = 0.42f),
+        modifier = Modifier.size(12.dp),
+      )
+      Icon(
+        imageVector = Icons.Filled.WaterDrop,
+        contentDescription = null,
+        tint = Ink.copy(alpha = 0.42f),
+        modifier = Modifier.size(12.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun TemplateEditableText(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  fontFamily: FontFamily,
+  textAlign: TextAlign,
+  fontSize: androidx.compose.ui.unit.TextUnit,
+  color: Color,
+  lineHeight: androidx.compose.ui.unit.TextUnit,
+  minLines: Int = 1,
+  enabled: Boolean = true,
+  letterSpacing: androidx.compose.ui.unit.TextUnit = 0.sp,
+  fontWeight: FontWeight = FontWeight.Thin,
+) {
+  BasicTextField(
+    value = value,
+    onValueChange = onValueChange,
+    modifier = Modifier.fillMaxWidth(),
+    enabled = enabled,
+    minLines = minLines,
+    textStyle = TextStyle(
+      fontFamily = fontFamily,
+      fontWeight = fontWeight,
+      fontSize = fontSize,
+      lineHeight = lineHeight,
+      color = color,
+      textAlign = textAlign,
+      letterSpacing = letterSpacing,
+    ),
+    cursorBrush = SolidColor(Accent),
+    decorationBox = { innerTextField ->
+      Box(modifier = Modifier.fillMaxWidth()) {
+        if (value.isBlank() && placeholder.isNotBlank()) {
+          Text(
+            text = placeholder,
+            modifier = Modifier.fillMaxWidth(),
+            color = color.copy(alpha = 0.52f),
+            textAlign = textAlign,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = fontWeight,
+              fontSize = fontSize,
+              lineHeight = lineHeight,
+              letterSpacing = letterSpacing,
+            ),
+          )
+        }
+        innerTextField()
+      }
+    },
+  )
+}
+
+@Composable
+private fun StackedTemplateRow(
+  uriString: String?,
+  title: String,
+  onTitleChange: (String) -> Unit,
+  titlePlaceholder: String,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  descriptionPlaceholder: String,
+  fontFamily: FontFamily,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(14.dp),
+    verticalAlignment = Alignment.Top,
+  ) {
+    TemplateMediaImage(
+      uriString = uriString,
+      modifier = Modifier
+        .width(124.dp)
+        .height(124.dp),
+    )
+    Column(
+      modifier = Modifier.weight(1f),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      TemplateEditableText(
+        value = title,
+        onValueChange = onTitleChange,
+        placeholder = titlePlaceholder,
+        fontFamily = fontFamily,
+        textAlign = TextAlign.Start,
+        fontSize = 26.sp,
+        color = Ink.copy(alpha = 0.78f),
+        lineHeight = 28.sp,
+      )
+      TemplateEditableText(
+        value = description,
+        onValueChange = onDescriptionChange,
+        placeholder = descriptionPlaceholder,
+        fontFamily = fontFamily,
+        textAlign = TextAlign.Start,
+        fontSize = 10.5.sp,
+        color = Ink.copy(alpha = 0.8f),
+        lineHeight = 14.sp,
+        minLines = 4,
+      )
+      CareIconRow()
+    }
+  }
+}
+
+@Composable
+private fun MediaThumbnailCarousel(
+  mediaUris: List<String>,
+  selectedIndex: Int,
+  fontFamily: FontFamily,
+  onAddFromDrive: () -> Unit,
+  onSelect: (Int) -> Unit,
+  onShare: (String) -> Unit,
+) {
+  val scrollState = rememberScrollState()
+  val density = LocalDensity.current
+  val expandedWidth = 132.dp
+  val collapsedWidth = 42.dp
+  val addTileWidth = 76.dp
+  val itemGap = 8.dp
+  val horizontalPadding = 2.dp
+
+  LaunchedEffect(mediaUris, selectedIndex) {
+    if (mediaUris.isEmpty()) return@LaunchedEffect
+
+    val targetCenterPx = with(density) {
+      var position = addTileWidth.toPx() + itemGap.toPx()
+      repeat(selectedIndex) {
+        position += collapsedWidth.toPx()
+        position += itemGap.toPx()
+      }
+      position + (expandedWidth.toPx() / 2f)
+    }
+
+    val viewportCenterPx = scrollState.viewportSize / 2f
+    val desiredScroll = (targetCenterPx - viewportCenterPx).toInt().coerceAtLeast(0)
+    val maxScroll = scrollState.maxValue.coerceAtLeast(0)
+    scrollState.animateScrollTo(desiredScroll.coerceAtMost(maxScroll))
+  }
+
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .horizontalScroll(scrollState)
+      .height(112.dp)
+      .padding(horizontal = horizontalPadding),
+    horizontalArrangement = Arrangement.spacedBy(itemGap),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    AddMediaThumbnailCard(
+      fontFamily = fontFamily,
+      width = addTileWidth,
+      onClick = onAddFromDrive,
+    )
+
+    mediaUris.forEachIndexed { index, uriString ->
+      MediaThumbnailCard(
+        uriString = uriString,
+        selected = index == selectedIndex,
+        fontFamily = fontFamily,
+        width = if (index == selectedIndex) expandedWidth else collapsedWidth,
+        onClick = { onSelect(index) },
+        onShare = { onShare(uriString) },
+      )
+    }
+  }
+}
+
+@Composable
 private fun AddMediaThumbnailCard(
   fontFamily: FontFamily,
+  width: Dp = 132.dp,
   onClick: () -> Unit,
 ) {
   Surface(
     modifier = Modifier
-      .width(132.dp)
+      .width(width)
       .height(112.dp)
       .clickable(onClick = onClick),
     shape = CardShape,
@@ -5098,6 +6671,7 @@ private fun MediaThumbnailCard(
   uriString: String,
   selected: Boolean,
   fontFamily: FontFamily,
+  width: Dp = 132.dp,
   onClick: () -> Unit,
   onShare: () -> Unit,
 ) {
@@ -5107,10 +6681,15 @@ private fun MediaThumbnailCard(
     uriString = uriString.takeUnless { isVideo },
     maxDimensionPx = 320,
   )
+  val animatedWidth by animateDpAsState(
+    targetValue = width,
+    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+    label = "mediaThumbnailWidth",
+  )
 
   Surface(
     modifier = Modifier
-      .width(132.dp)
+      .width(animatedWidth)
       .height(112.dp)
       .border(
         width = if (selected) 2.dp else 0.dp,
@@ -5157,22 +6736,24 @@ private fun MediaThumbnailCard(
         )
       }
 
-      Box(
-        modifier = Modifier
-          .align(Alignment.TopEnd)
-          .padding(8.dp),
-      ) {
-        CircleIconAction(
-          size = 30.dp,
-          icon = {
-            Icon(
-              imageVector = Icons.Filled.Share,
-              contentDescription = "Share media thumbnail",
-              tint = Accent,
-            )
-          },
-          onClick = onShare,
-        )
+      if (selected) {
+        Box(
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(8.dp),
+        ) {
+          CircleIconAction(
+            size = 30.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Share,
+                contentDescription = "Share media thumbnail",
+                tint = Accent,
+              )
+            },
+            onClick = onShare,
+          )
+        }
       }
     }
   }
@@ -5718,7 +7299,11 @@ private fun BuildProductQuantityPopup(
           )
         }
         Text(text = item.name, color = Ink, style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 28.sp))
-        Text(text = "${item.category.label} - Stock ${item.stock} - \u20B9 ${item.price}", color = Ink.copy(alpha = 0.45f), style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 18.sp))
+        Text(
+          text = "\u20B9 ${item.price}",
+          color = Ink,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 26.sp),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
           QuantityButton("-", onDecrease, fontFamily)
           BasicTextField(
@@ -5866,7 +7451,11 @@ private fun BuildProductCatalogRow(
       Column(modifier = Modifier.weight(1f)) {
         Text(text = item.name, color = Ink, style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp))
         Text(text = "Stock ${item.stock}", color = Ink.copy(alpha = 0.42f), style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp))
-        Text(text = "\u20B9 ${formatAmount(item.price)}", color = Accent, style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp))
+        Text(
+          text = "\u20B9 ${item.price}",
+          color = Ink,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 18.sp),
+        )
       }
       Text(text = ">", color = Accent, style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 24.sp))
     }
@@ -5886,7 +7475,10 @@ private fun CheckoutGrid(
   discountPercent: Double,
   fontFamily: FontFamily,
 ) {
-  val detailTone = Color(0xFF575757)
+  val valueTone = Color(0xFF3F3F3F)
+  val labelTone = Accent
+  val softGrayTone = Color(0xFF6F6F6F)
+  val lightGrayTone = Color(0xFFB9B9B9)
   Surface(
     modifier = Modifier.fillMaxWidth(),
     shape = CardShape,
@@ -5908,12 +7500,13 @@ private fun CheckoutGrid(
           modifier = Modifier.weight(0.9f),
           emphasize = true,
           align = TextAlign.Start,
+          tone = labelTone,
         )
         CheckoutCell(
           text = "\u20B9${formatAmount(priceTotal)}",
           fontFamily = fontFamily,
           modifier = Modifier.weight(1.8f),
-          tone = Accent,
+          tone = valueTone,
           large = true,
         )
       }
@@ -5922,57 +7515,76 @@ private fun CheckoutGrid(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("0%", fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("0%", fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("\u20B9 ${formatAmount(finalPrice)}", fontFamily, Modifier.weight(1f), tone = valueTone)
       }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("Discount", fontFamily, Modifier.weight(2f), emphasize = true, tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(discountTotal)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell("Discount", fontFamily, Modifier.weight(2f), emphasize = true, tone = labelTone)
+        CheckoutCell(
+          "\u20B9 ${formatAmount(discountTotal)}",
+          fontFamily,
+          Modifier.weight(1f),
+          tone = AccentGreen,
+          fontWeight = FontWeight.Normal,
+        )
       }
 
-      CheckoutCell("MRP", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = detailTone)
+      CheckoutCell("MRP", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = labelTone)
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(beforeMarkup)}", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
-        CheckoutCell("%", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
-      }
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(discountedUnitPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("${formatEditableDecimal(discountPercent)}%", fontFamily, Modifier.weight(1f), tone = detailTone)
-      }
-
-      CheckoutCell("COST", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = detailTone)
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
-        CheckoutCell("P&L", fontFamily, Modifier.weight(1f), emphasize = true, tone = detailTone)
+        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = labelTone)
+        CheckoutCell(
+          "\u20B9 ${formatAmount(beforeMarkup)}",
+          fontFamily,
+          Modifier.weight(1f),
+          emphasize = true,
+          tone = Accent,
+          fontWeight = FontWeight.Normal,
+        )
+        CheckoutCell("%", fontFamily, Modifier.weight(1f), emphasize = true, tone = labelTone)
       }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f), tone = detailTone)
-        CheckoutCell("\u20B9 ${formatAmount(profitLoss)}", fontFamily, Modifier.weight(1f), tone = detailTone)
+        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("\u20B9 ${formatAmount(discountedUnitPrice)}", fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("${formatEditableDecimal(discountPercent)}%", fontFamily, Modifier.weight(1f), tone = valueTone)
+      }
+
+      CheckoutCell("COST", fontFamily, Modifier.fillMaxWidth(), emphasize = true, align = TextAlign.Start, tone = softGrayTone)
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        CheckoutCell("Q", fontFamily, Modifier.weight(1f), emphasize = true, tone = labelTone)
+        CheckoutCell(
+          "\u20B9 ${formatAmount(landingPrice)}",
+          fontFamily,
+          Modifier.weight(1f),
+          emphasize = true,
+          tone = lightGrayTone,
+        )
+        CheckoutCell("P&L", fontFamily, Modifier.weight(1f), emphasize = true, tone = lightGrayTone)
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        CheckoutCell(formatEditableDecimal(quantityValue), fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("\u20B9 ${formatAmount(landingPrice)}", fontFamily, Modifier.weight(1f), tone = valueTone)
+        CheckoutCell("\u20B9 ${formatAmount(profitLoss)}", fontFamily, Modifier.weight(1f), tone = valueTone)
       }
     }
   }
@@ -5987,6 +7599,7 @@ private fun CheckoutCell(
   emphasize: Boolean = false,
   large: Boolean = false,
   align: TextAlign = TextAlign.Center,
+  fontWeight: FontWeight? = null,
 ) {
   Surface(
     modifier = modifier,
@@ -6004,7 +7617,7 @@ private fun CheckoutCell(
       color = tone,
       style = TextStyle(
         fontFamily = fontFamily,
-        fontWeight = if (emphasize) FontWeight.Normal else FontWeight.Thin,
+        fontWeight = fontWeight ?: if (emphasize) FontWeight.Normal else FontWeight.Thin,
         fontSize = if (large) 32.sp else 18.sp,
         lineHeight = if (large) 36.sp else 20.sp,
       ),
@@ -6493,6 +8106,7 @@ private fun InlineEditor(
 
 @Composable
 private fun CircleIconAction(
+  modifier: Modifier = Modifier,
   size: Dp,
   icon: @Composable () -> Unit,
   borderColor: Color = Color.Transparent,
@@ -6500,7 +8114,7 @@ private fun CircleIconAction(
   onClick: () -> Unit,
 ) {
   Surface(
-    modifier = Modifier
+    modifier = modifier
       .size(size)
       .shadow(
         elevation = 10.dp,
@@ -6534,6 +8148,11 @@ private data class ProductDetail(
   val checkout: String = "",
   val imageUri: String? = null,
   val mediaUris: List<String> = emptyList(),
+  val templatePrimaryTitle: String = "",
+  val templatePrimaryDescription: String = "",
+  val templateSecondaryTitle: String = "",
+  val templateSecondaryDescription: String = "",
+  val templateContact: String = "",
 )
 
 private enum class OtcCarouselCategory {
@@ -6549,9 +8168,38 @@ private data class OtcCarouselItem(
   val shortName: String,
   val price: String,
   val landingPrice: String,
+  val imageUri: String? = null,
 )
 
 private fun otcCatalog(): List<OtcCarouselItem> {
+  val liveItems = LiveInventoryCatalog.inventoryByDestination
+    .filterKeys { destination -> destination != DashboardDestination.OTC }
+    .values
+    .flatten()
+    .map { item ->
+      OtcCarouselItem(
+        id = item.id,
+        category = when (item.category) {
+          DashboardDestination.Plants -> OtcCarouselCategory.Plant
+          DashboardDestination.Pots -> OtcCarouselCategory.Pots
+          DashboardDestination.Supplies -> OtcCarouselCategory.Supplies
+          DashboardDestination.OTC -> OtcCarouselCategory.Plant
+        },
+        name = item.name,
+        shortName = item.name
+          .split(" ")
+          .filter { it.isNotBlank() }
+          .take(2)
+          .joinToString("") { it.take(1).uppercase(Locale.US) }
+          .ifBlank { item.name.take(2).uppercase(Locale.US) },
+        price = item.price.orZero(),
+        landingPrice = item.checkout.orZero(),
+        imageUri = item.mediaUris.firstOrNull() ?: item.imageUri,
+      )
+    }
+
+  if (liveItems.isNotEmpty()) return liveItems
+
   return listOf(
     OtcCarouselItem("plant-1", OtcCarouselCategory.Plant, "Bamboo 3 Lucky", "B3", "1200", "820"),
     OtcCarouselItem("plant-2", OtcCarouselCategory.Plant, "Money Plant", "MP", "650", "430"),
@@ -6902,6 +8550,51 @@ private fun shareMediaUri(
   }
 }
 
+private fun shareSelectedImages(
+  context: android.content.Context,
+  selectedImages: List<String>,
+  platform: SharePlatformAction,
+) {
+  if (selectedImages.isEmpty()) return
+  runCatching {
+    val uris = selectedImages.map { it.toUri() }
+    val mimeType = if (uris.size == 1) {
+      context.contentResolver.getType(uris.first()) ?: "image/*"
+    } else {
+      "image/*"
+    }
+    val intent = if (uris.size == 1) {
+      android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = mimeType
+        putExtra(android.content.Intent.EXTRA_STREAM, uris.first())
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+    } else {
+      android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+        type = mimeType
+        putParcelableArrayListExtra(
+          android.content.Intent.EXTRA_STREAM,
+          ArrayList(uris),
+        )
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+    }
+
+    val targetIntent = intent.apply {
+      platform.packageName?.let { targetPackage ->
+        `package` = targetPackage
+      }
+    }
+
+    val launchIntent = if (platform.id == "more" || platform.packageName == null) {
+      android.content.Intent.createChooser(targetIntent, "Share images")
+    } else {
+      targetIntent
+    }
+    context.startActivity(launchIntent)
+  }
+}
+
 private fun InventoryItem.toProductDetail(): ProductDetail {
   return ProductDetail(
     name = name,
@@ -6913,6 +8606,11 @@ private fun InventoryItem.toProductDetail(): ProductDetail {
     checkout = checkout,
     imageUri = imageUri,
     mediaUris = mediaUris.ifEmpty { listOfNotNull(imageUri) },
+    templatePrimaryTitle = templatePrimaryTitle,
+    templatePrimaryDescription = templatePrimaryDescription,
+    templateSecondaryTitle = templateSecondaryTitle,
+    templateSecondaryDescription = templateSecondaryDescription,
+    templateContact = templateContact,
   )
 }
 
@@ -6929,6 +8627,11 @@ private fun buildInventoryItem(
   unitPrice: Int,
   checkoutDisplay: String,
   selectedMediaUris: List<String>,
+  templatePrimaryTitle: String,
+  templatePrimaryDescription: String,
+  templateSecondaryTitle: String,
+  templateSecondaryDescription: String,
+  templateContact: String,
   status: String,
 ): InventoryItem {
   val primaryMediaUri = selectedMediaUris.firstOrNull()
@@ -6945,6 +8648,11 @@ private fun buildInventoryItem(
     imageUri = primaryMediaUri,
     mediaUris = selectedMediaUris,
     status = status,
+    templatePrimaryTitle = templatePrimaryTitle,
+    templatePrimaryDescription = templatePrimaryDescription,
+    templateSecondaryTitle = templateSecondaryTitle,
+    templateSecondaryDescription = templateSecondaryDescription,
+    templateContact = templateContact,
   )
 }
 

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:app="http://schemas.android.com/apk/res-auto"
+  android:id="@+id/otcRoot"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="#F7F7F7">
+
+  <androidx.constraintlayout.widget.ConstraintLayout
+    android:id="@+id/otcHeader"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:minHeight="186dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    app:layout_constraintEnd_toEndOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toTopOf="parent">
+
+    <ImageView
+      android:id="@+id/otcLogo"
+      android:layout_width="0dp"
+      android:layout_height="0dp"
+      android:adjustViewBounds="true"
+      android:contentDescription="@string/otc_logo_content_description"
+      android:scaleType="fitStart"
+      android:src="@drawable/av_logo_exact"
+      app:layout_constraintBottom_toBottomOf="parent"
+      app:layout_constraintDimensionRatio="360:118"
+      app:layout_constraintEnd_toStartOf="@+id/otcActionRail"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintTop_toTopOf="parent"
+      app:layout_constraintVertical_bias="0" />
+
+    <LinearLayout
+      android:id="@+id/otcActionRail"
+      android:layout_width="wrap_content"
+      android:layout_height="0dp"
+      android:gravity="end"
+      android:orientation="vertical"
+      android:paddingStart="12dp"
+      app:layout_constraintBottom_toBottomOf="parent"
+      app:layout_constraintEnd_toEndOf="parent"
+      app:layout_constraintTop_toTopOf="parent">
+
+      <ImageButton
+        android:id="@+id/actionBack"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/bg_otc_action_button"
+        android:contentDescription="@string/otc_action_back"
+        android:padding="14dp"
+        android:scaleType="fitCenter"
+        android:src="@android:drawable/ic_media_previous" />
+
+      <ImageButton
+        android:id="@+id/actionCart"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_otc_action_button"
+        android:contentDescription="@string/otc_action_cart"
+        android:padding="13dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/wheelbarrow" />
+
+      <ImageButton
+        android:id="@+id/actionClosed"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_otc_action_button"
+        android:contentDescription="@string/otc_action_closed"
+        android:padding="13dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/icon_closed_list" />
+    </LinearLayout>
+
+  </androidx.constraintlayout.widget.ConstraintLayout>
+
+  <androidx.core.widget.NestedScrollView
+    android:id="@+id/otcScrollView"
+    android:layout_width="0dp"
+    android:layout_height="0dp"
+    android:clipToPadding="false"
+    android:fillViewport="true"
+    android:overScrollMode="ifContentScrolls"
+    android:paddingBottom="24dp"
+    app:layout_constraintBottom_toBottomOf="parent"
+    app:layout_constraintEnd_toEndOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toBottomOf="@id/otcHeader">
+
+    <LinearLayout
+      android:id="@+id/otcScrollContent"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:paddingStart="16dp"
+      android:paddingTop="8dp"
+      android:paddingEnd="16dp"
+      android:paddingBottom="24dp" />
+  </androidx.core.widget.NestedScrollView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

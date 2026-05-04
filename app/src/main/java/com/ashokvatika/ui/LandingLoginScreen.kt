@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,8 +37,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.ashokvatika.app.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -54,8 +57,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ashokvatika.R
 import com.ashokvatika.ui.components.AshokvatikaLogo
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 private val Bg = Color(0xFFF7F7F7)
 private val Ink = Color(0xFF141414)
@@ -70,18 +75,33 @@ fun LandingLoginScreen(
 ) {
   val dmSans = rememberDmSans()
   val keyboard = LocalSoftwareKeyboardController.current
+  val auth = remember { FirebaseAuth.getInstance() }
+  val scope = rememberCoroutineScope()
 
   var username by remember { mutableStateOf("admin") }
   var password by remember { mutableStateOf("123") }
   var showUser by remember { mutableStateOf(true) }
   var showPass by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
+  var isSubmitting by remember { mutableStateOf(false) }
 
   fun submit() {
+    if (isSubmitting) return
     if (username == "admin" && password == "123") {
       error = null
       keyboard?.hide()
-      onLoggedIn()
+      isSubmitting = true
+      scope.launch {
+        runCatching {
+          auth.signInAnonymously().await()
+        }.onSuccess {
+          isSubmitting = false
+          onLoggedIn()
+        }.onFailure { throwable ->
+          isSubmitting = false
+          onLoggedIn()
+        }
+      }
     } else {
       error = "Use username admin and password 123."
     }
@@ -119,12 +139,6 @@ fun LandingLoginScreen(
       maxWidth > 500.dp -> 56.sp
       else -> 44.sp
     }
-    val poweredByHeight = when {
-      maxWidth > 1200.dp -> 150.dp
-      maxWidth > 800.dp -> 132.dp
-      else -> 118.dp
-    }
-
     Box(
       modifier = Modifier
         .fillMaxSize()
@@ -139,14 +153,14 @@ fun LandingLoginScreen(
           .width(contentWidth)
           .fillMaxWidth()
           .verticalScroll(rememberScrollState())
-          .padding(horizontal = 8.dp, vertical = 8.dp),
+          .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Spacer(modifier = Modifier.height(topSpacing))
 
         AshokvatikaLogo(
           modifier = Modifier
-            .fillMaxWidth(0.96f)
+            .fillMaxWidth(0.6f)
             .padding(horizontal = 8.dp),
           textSize = brandTextSize,
           markSize = logoHeight * 0.54f,
@@ -162,6 +176,8 @@ fun LandingLoginScreen(
         ) {
           LoginField(
             label = "User name",
+            labelImageRes = R.drawable.icon_username,
+            labelImageSize = 34.dp,
             value = username,
             onValueChange = {
               username = it
@@ -172,10 +188,13 @@ fun LandingLoginScreen(
             dmSans = dmSans,
             keyboardType = KeyboardType.Text,
             imeAction = ImeAction.Next,
+            enabled = !isSubmitting,
           )
 
           LoginField(
             label = "Password",
+            labelImageRes = R.drawable.icon_password,
+            labelImageSize = 42.dp,
             value = password,
             onValueChange = {
               password = it
@@ -189,6 +208,7 @@ fun LandingLoginScreen(
             onDone = ::submit,
             showConfirm = password.isNotBlank(),
             onConfirm = ::submit,
+            enabled = !isSubmitting,
           )
         }
 
@@ -206,33 +226,21 @@ fun LandingLoginScreen(
           )
         }
 
-        Spacer(modifier = Modifier.weight(1f, fill = true))
+        if (isSubmitting) {
+          Spacer(modifier = Modifier.height(12.dp))
+          Text(
+            text = "Connecting to Firebase...",
+            color = LabelGreen,
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+              fontFamily = dmSans,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 14.sp,
+            ),
+          )
+        }
+
         Spacer(modifier = Modifier.height(72.dp))
-
-        Image(
-          painter = painterResource(R.drawable.logo_powered_by),
-          contentDescription = "Powered by BrandStock",
-          contentScale = ContentScale.Fit,
-          modifier = Modifier
-            .fillMaxWidth(0.46f)
-            .height(poweredByHeight),
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        Text(
-          text = "Forgot password ?\nprivacy policy",
-          color = Accent,
-          textAlign = TextAlign.Center,
-          style = TextStyle(
-            fontFamily = dmSans,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 16.sp,
-            lineHeight = 24.sp,
-          ),
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
       }
     }
   }
@@ -241,6 +249,8 @@ fun LandingLoginScreen(
 @Composable
 private fun LoginField(
   label: String,
+  labelImageRes: Int? = null,
+  labelImageSize: androidx.compose.ui.unit.Dp = 34.dp,
   value: String,
   onValueChange: (String) -> Unit,
   showValue: Boolean,
@@ -248,25 +258,37 @@ private fun LoginField(
   dmSans: FontFamily,
   keyboardType: KeyboardType,
   imeAction: ImeAction,
+  enabled: Boolean,
   onDone: (() -> Unit)? = null,
   showConfirm: Boolean = false,
   onConfirm: (() -> Unit)? = null,
 ) {
-  Text(
-    text = label,
-    color = LabelGreen,
-    modifier = Modifier.fillMaxWidth(),
-    style = TextStyle(
-      fontFamily = dmSans,
-      fontWeight = FontWeight.SemiBold,
-      fontSize = 22.sp,
-    ),
-  )
+  if (labelImageRes != null) {
+    Image(
+      painter = painterResource(labelImageRes),
+      contentDescription = label,
+      contentScale = ContentScale.Fit,
+      modifier = Modifier
+        .size(labelImageSize),
+    )
+  } else {
+    Text(
+      text = label,
+      color = LabelGreen,
+      modifier = Modifier.fillMaxWidth(),
+      style = TextStyle(
+        fontFamily = dmSans,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 22.sp,
+      ),
+    )
+  }
 
   TextField(
     value = value,
     onValueChange = onValueChange,
     singleLine = true,
+    enabled = enabled,
     visualTransformation = if (showValue) VisualTransformation.None else PasswordVisualTransformation(),
     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
       keyboardType = keyboardType,
@@ -277,13 +299,13 @@ private fun LoginField(
     ),
     modifier = Modifier
       .fillMaxWidth()
-      .height(46.dp)
-      .sizeIn(minHeight = 46.dp),
+      .height(56.dp)
+      .sizeIn(minHeight = 56.dp),
     shape = RoundedCornerShape(16.dp),
     trailingIcon = {
       Row(verticalAlignment = Alignment.CenterVertically) {
         if (showConfirm && onConfirm != null) {
-          IconButton(onClick = onConfirm) {
+          IconButton(onClick = onConfirm, enabled = enabled) {
             Icon(
               imageVector = Icons.Filled.CheckCircle,
               contentDescription = "Confirm login",
@@ -291,7 +313,7 @@ private fun LoginField(
             )
           }
         }
-        IconButton(onClick = onToggleVisibility) {
+        IconButton(onClick = onToggleVisibility, enabled = enabled) {
           Icon(
             imageVector = if (showValue) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
             contentDescription = "Toggle visibility",
@@ -302,8 +324,9 @@ private fun LoginField(
     },
     textStyle = TextStyle(
       fontFamily = dmSans,
-      fontWeight = FontWeight.Medium,
-      fontSize = 15.sp,
+      fontWeight = FontWeight.Thin,
+      fontSize = 18.sp,
+      lineHeight = 22.sp,
       color = Ink,
     ),
     colors = TextFieldDefaults.colors(
@@ -321,6 +344,7 @@ private fun LoginField(
 @Composable
 private fun rememberDmSans(): FontFamily {
   return FontFamily(
+    Font(R.font.dm_sans_thin, weight = FontWeight.Thin),
     Font(R.font.dm_sans_regular, weight = FontWeight.Normal),
     Font(R.font.dm_sans_semibold, weight = FontWeight.SemiBold),
   )

@@ -10,7 +10,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import com.ashokvatika.R
+import com.ashokvatika.app.R
 
 val BrandOrange = Color(0xFFF17C32)
 val BrandGreen = Color(0xFF7CD84F)
@@ -28,8 +28,9 @@ fun AshokvatikaLogo(
   modifier: Modifier = Modifier,
   textSize: TextUnit,
   markSize: Dp,
+  fixedHeight: Dp? = null,
 ) {
-  val logoHeight = (markSize + (textSize.value * 0.72f).dp) * 1.5f
+  val logoHeight = fixedHeight ?: (markSize + (textSize.value * 0.72f).dp) * 1.5f
   Image(
     painter = painterResource(R.drawable.av_logo_exact),
     contentDescription = "Ashokvatika logo",
