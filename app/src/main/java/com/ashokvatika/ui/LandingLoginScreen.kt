@@ -70,6 +70,10 @@ private val LabelGreen = Color(0xFF5E9655)
 private val FieldFill = Color(0xFFF3EFE7)
 private val Panel = Color(0xFFFFFCF7)
 private val PanelBorder = Color(0xFFE9DED0)
+private val LoginPhoneHorizontalPadding = 12.dp
+private val LoginTabletHorizontalPadding = 20.dp
+private val LoginCompactHorizontalPadding = 8.dp
+private val LoginPageBottomPadding = 16.dp
 private const val AdminAlias = "admin"
 private const val AdminPassword = "123"
 
@@ -116,8 +120,16 @@ fun LandingLoginScreen(
       .navigationBarsPadding()
       .imePadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 24.dp, 760.dp)
-    val formWidth = minOf(contentWidth * 0.7f, 380.dp)
+    val phoneScreen = maxWidth < 600.dp
+    val compactScreen = phoneScreen && (maxWidth < 430.dp || maxHeight < 900.dp)
+    val horizontalPadding = when {
+      phoneScreen -> LoginPhoneHorizontalPadding
+      maxWidth > 700.dp -> LoginTabletHorizontalPadding
+      compactScreen -> LoginCompactHorizontalPadding
+      else -> LoginPhoneHorizontalPadding
+    }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
+    val formWidth = minOf(contentWidth * 0.56f, 420.dp)
     val topSpacing = when {
       maxHeight > 1000.dp -> 108.dp
       maxHeight > 800.dp -> 84.dp
@@ -157,7 +169,12 @@ fun LandingLoginScreen(
           .width(contentWidth)
           .fillMaxWidth()
           .verticalScroll(rememberScrollState())
-          .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 24.dp),
+          .padding(
+            start = horizontalPadding,
+            top = LoginPageBottomPadding,
+            end = horizontalPadding,
+            bottom = LoginPageBottomPadding,
+          ),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Spacer(modifier = Modifier.height(topSpacing))

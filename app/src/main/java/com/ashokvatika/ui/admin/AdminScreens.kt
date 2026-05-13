@@ -542,14 +542,20 @@ fun AdminHomeScreen(
     modifier = Modifier
       .fillMaxSize()
       .background(Bg)
-      .navigationBarsPadding()
-      .padding(horizontal = 16.dp, vertical = 16.dp),
+      .navigationBarsPadding(),
   ) {
     val phoneScreen = isPhoneScreen(maxWidth)
     val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
     val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = when {
+      phoneScreen -> OtcPhoneHeaderHorizontalPadding
+      maxWidth > 700.dp -> OtcHeaderHorizontalPadding
+      compactScreen -> 8.dp
+      else -> 12.dp
+    }
     val dashboardContentOffset = if (compactScreen) 4.dp else 10.dp
-    val dashboardLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val dashboardLogoWidth = contentWidth * layout.logoWidthFraction
     val dashboardLogoHeight = (dashboardLogoWidth / 4.92f).coerceAtLeast(50.dp)
     val dashboardTopSpacer = 14.dp
     val dashboardTileGap = when {
@@ -574,9 +580,15 @@ fun AdminHomeScreen(
 
     Column(
       modifier = Modifier
-        .width(layout.contentWidth)
+        .width(contentWidth)
         .align(Alignment.Center)
-        .offset(y = dashboardContentOffset),
+        .offset(y = dashboardContentOffset)
+        .padding(
+          start = horizontalPadding,
+          top = OtcPageVerticalPadding,
+          end = horizontalPadding,
+          bottom = OtcPageVerticalPadding,
+        ),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       AshokvatikaLogo(
