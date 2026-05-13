@@ -23,6 +23,11 @@ object LocalBridgeContract {
     const val ImageUri = "imageUri"
     const val ImageBase64 = "imageBase64"
     const val QrCodeValue = "qrCodeValue"
+    const val TemplatePrimaryTitle = "templatePrimaryTitle"
+    const val TemplatePrimaryDescription = "templatePrimaryDescription"
+    const val TemplateSecondaryTitle = "templateSecondaryTitle"
+    const val TemplateSecondaryDescription = "templateSecondaryDescription"
+    const val TemplateContact = "templateContact"
     const val UpdatedAt = "updatedAt"
 
     val ContentUri: Uri = BaseUri.buildUpon().appendPath(Table).build()

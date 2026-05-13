@@ -58,15 +58,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ashokvatika.ui.components.AshokvatikaLogo
-import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 private val Bg = Color(0xFFF7F7F7)
 private val Ink = Color(0xFF141414)
 private val Accent = Color(0xFFF17C32)
 private val LabelGreen = Color(0xFF57A46B)
 private val FieldFill = Color(0xFFEFF1F2)
+private const val AdminAlias = "admin"
+private const val AdminPassword = "123"
 
 @Composable
 fun LandingLoginScreen(
@@ -75,11 +75,10 @@ fun LandingLoginScreen(
 ) {
   val dmSans = rememberDmSans()
   val keyboard = LocalSoftwareKeyboardController.current
-  val auth = remember { FirebaseAuth.getInstance() }
   val scope = rememberCoroutineScope()
 
-  var username by remember { mutableStateOf("admin") }
-  var password by remember { mutableStateOf("123") }
+  var username by remember { mutableStateOf(AdminAlias) }
+  var password by remember { mutableStateOf(AdminPassword) }
   var showUser by remember { mutableStateOf(true) }
   var showPass by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
@@ -87,20 +86,18 @@ fun LandingLoginScreen(
 
   fun submit() {
     if (isSubmitting) return
-    if (username == "admin" && password == "123") {
+    val loginId = username.trim()
+    if (loginId.isBlank() || password.isBlank()) {
+      error = "Use username admin and password 123."
+      return
+    }
+    if (loginId.equals(AdminAlias, ignoreCase = true) && password == AdminPassword) {
       error = null
       keyboard?.hide()
       isSubmitting = true
       scope.launch {
-        runCatching {
-          auth.signInAnonymously().await()
-        }.onSuccess {
-          isSubmitting = false
-          onLoggedIn()
-        }.onFailure { throwable ->
-          isSubmitting = false
-          onLoggedIn()
-        }
+        onLoggedIn()
+        isSubmitting = false
       }
     } else {
       error = "Use username admin and password 123."
@@ -229,7 +226,7 @@ fun LandingLoginScreen(
         if (isSubmitting) {
           Spacer(modifier = Modifier.height(12.dp))
           Text(
-            text = "Connecting to Firebase...",
+            text = "Opening admin panel...",
             color = LabelGreen,
             textAlign = TextAlign.Center,
             style = TextStyle(

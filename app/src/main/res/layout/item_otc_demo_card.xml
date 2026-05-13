@@ -3,27 +3,48 @@
   xmlns:app="http://schemas.android.com/apk/res-auto"
   android:layout_width="match_parent"
   android:layout_height="wrap_content"
-  android:layout_marginBottom="12dp"
-  android:background="#FFFFFFFF"
-  android:minHeight="96dp"
-  android:padding="16dp">
+  android:layout_marginBottom="16dp"
+  android:background="@drawable/bg_otc_card"
+  android:clipToPadding="false"
+  android:elevation="6dp"
+  android:minHeight="120dp"
+  android:padding="20dp">
+
+  <TextView
+    android:id="@+id/demoCardEyebrow"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_otc_chip"
+    android:paddingStart="12dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="6dp"
+    android:text="@string/otc_card_eyebrow"
+    android:textColor="#65707C"
+    android:textSize="11sp"
+    android:textStyle="bold"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toTopOf="parent" />
 
   <TextView
     android:id="@+id/demoCardTitle"
     android:layout_width="0dp"
     android:layout_height="wrap_content"
-    android:textColor="#141414"
-    android:textSize="22sp"
+    android:layout_marginTop="16dp"
+    android:textColor="#25303D"
+    android:textSize="21sp"
+    android:textStyle="bold"
     app:layout_constraintEnd_toEndOf="parent"
     app:layout_constraintStart_toStartOf="parent"
-    app:layout_constraintTop_toTopOf="parent" />
+    app:layout_constraintTop_toBottomOf="@id/demoCardEyebrow" />
 
   <TextView
     android:id="@+id/demoCardBody"
     android:layout_width="0dp"
     android:layout_height="wrap_content"
     android:layout_marginTop="8dp"
-    android:textColor="#4C141414"
+    android:lineSpacingExtra="3dp"
+    android:textColor="#68737E"
     android:textSize="15sp"
     app:layout_constraintEnd_toEndOf="parent"
     app:layout_constraintStart_toStartOf="parent"

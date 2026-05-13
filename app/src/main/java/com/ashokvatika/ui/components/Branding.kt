@@ -21,6 +21,8 @@ enum class BrandButtonIcon {
   Plants,
   Pots,
   Supplies,
+  Docs,
+  Art,
 }
 
 @Composable
@@ -51,6 +53,8 @@ fun BrandButtonGlyph(
     BrandButtonIcon.Plants -> R.drawable.icon_plants
     BrandButtonIcon.Pots -> R.drawable.icon_pots
     BrandButtonIcon.Supplies -> R.drawable.icon_supplies
+    BrandButtonIcon.Docs -> R.drawable.icon_docs
+    BrandButtonIcon.Art -> R.drawable.icon_art
   }
   Image(
     painter = painterResource(iconRes),
