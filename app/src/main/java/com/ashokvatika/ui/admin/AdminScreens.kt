@@ -542,20 +542,14 @@ fun AdminHomeScreen(
     modifier = Modifier
       .fillMaxSize()
       .background(Bg)
-      .navigationBarsPadding(),
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
   ) {
     val phoneScreen = isPhoneScreen(maxWidth)
     val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
     val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
-    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
-    val horizontalPadding = when {
-      phoneScreen -> OtcPhoneHeaderHorizontalPadding
-      maxWidth > 700.dp -> OtcHeaderHorizontalPadding
-      compactScreen -> 8.dp
-      else -> 12.dp
-    }
     val dashboardContentOffset = if (compactScreen) 4.dp else 10.dp
-    val dashboardLogoWidth = contentWidth * layout.logoWidthFraction
+    val dashboardLogoWidth = layout.contentWidth * layout.logoWidthFraction
     val dashboardLogoHeight = (dashboardLogoWidth / 4.92f).coerceAtLeast(50.dp)
     val dashboardTopSpacer = 14.dp
     val dashboardTileGap = when {
@@ -580,15 +574,9 @@ fun AdminHomeScreen(
 
     Column(
       modifier = Modifier
-        .width(contentWidth)
+        .width(layout.contentWidth)
         .align(Alignment.Center)
-        .offset(y = dashboardContentOffset)
-        .padding(
-          start = horizontalPadding,
-          top = OtcPageVerticalPadding,
-          end = horizontalPadding,
-          bottom = OtcPageVerticalPadding,
-        ),
+        .offset(y = dashboardContentOffset),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       AshokvatikaLogo(
@@ -596,20 +584,6 @@ fun AdminHomeScreen(
         textSize = layout.brandTextSize,
         markSize = layout.brandMarkSize,
         fixedHeight = dashboardLogoHeight,
-      )
-
-      Spacer(modifier = Modifier.height(10.dp))
-
-      Text(
-        text = "Choose a workspace to manage products, OTC deals, documents, and art assets.",
-        color = Ink.copy(alpha = 0.68f),
-        textAlign = TextAlign.Center,
-        style = TextStyle(
-          fontFamily = dmSansThin,
-          fontWeight = FontWeight.Normal,
-          fontSize = if (compactScreen) 13.sp else 16.sp,
-          lineHeight = if (compactScreen) 18.sp else 22.sp,
-        ),
       )
 
       if (!syncMessage.isNullOrBlank()) {
