@@ -12,8 +12,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.ashokvatika.app.R
 
-val BrandOrange = Color(0xFFF17C32)
-val BrandGreen = Color(0xFF7CD84F)
+val BrandOrange = Color(0xFFE9782F)
+val BrandGreen = Color(0xFF5E9655)
 val BrandInk = Color(0xFF141414)
 
 enum class BrandButtonIcon {

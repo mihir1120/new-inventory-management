@@ -28,8 +28,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -60,11 +63,13 @@ import androidx.compose.ui.unit.sp
 import com.ashokvatika.ui.components.AshokvatikaLogo
 import kotlinx.coroutines.launch
 
-private val Bg = Color(0xFFF7F7F7)
+private val Bg = Color(0xFFF6F2EB)
 private val Ink = Color(0xFF141414)
-private val Accent = Color(0xFFF17C32)
-private val LabelGreen = Color(0xFF57A46B)
-private val FieldFill = Color(0xFFEFF1F2)
+private val Accent = Color(0xFFE9782F)
+private val LabelGreen = Color(0xFF5E9655)
+private val FieldFill = Color(0xFFF3EFE7)
+private val Panel = Color(0xFFFFFCF7)
+private val PanelBorder = Color(0xFFE9DED0)
 private const val AdminAlias = "admin"
 private const val AdminPassword = "123"
 
@@ -136,6 +141,8 @@ fun LandingLoginScreen(
       maxWidth > 500.dp -> 56.sp
       else -> 44.sp
     }
+    val helperTextSize = if (maxWidth > 500.dp) 18.sp else 15.sp
+    val helperLineHeight = if (maxWidth > 500.dp) 24.sp else 20.sp
     Box(
       modifier = Modifier
         .fillMaxSize()
@@ -163,79 +170,159 @@ fun LandingLoginScreen(
           markSize = logoHeight * 0.54f,
         )
 
-        Spacer(modifier = Modifier.height(38.dp + formLift))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        Column(
+        Text(
+          text = "Admin inventory and OTC workspace",
+          color = Ink.copy(alpha = 0.72f),
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = dmSans,
+            fontWeight = FontWeight.Normal,
+            fontSize = helperTextSize,
+            lineHeight = helperLineHeight,
+          ),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp + formLift))
+
+        Surface(
           modifier = Modifier
             .width(formWidth)
             .fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(18.dp),
+          shape = RoundedCornerShape(28.dp),
+          color = Panel,
+          border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+          shadowElevation = 10.dp,
+          tonalElevation = 0.dp,
         ) {
-          LoginField(
-            label = "User name",
-            labelImageRes = R.drawable.icon_username,
-            labelImageSize = 34.dp,
-            value = username,
-            onValueChange = {
-              username = it
-              error = null
-            },
-            showValue = showUser,
-            onToggleVisibility = { showUser = !showUser },
-            dmSans = dmSans,
-            keyboardType = KeyboardType.Text,
-            imeAction = ImeAction.Next,
-            enabled = !isSubmitting,
-          )
+          Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+          ) {
+            Text(
+              text = "Sign in to continue",
+              color = Ink,
+              style = TextStyle(
+                fontFamily = dmSans,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 22.sp,
+              ),
+            )
 
-          LoginField(
-            label = "Password",
-            labelImageRes = R.drawable.icon_password,
-            labelImageSize = 42.dp,
-            value = password,
-            onValueChange = {
-              password = it
-              error = null
-            },
-            showValue = showPass,
-            onToggleVisibility = { showPass = !showPass },
-            dmSans = dmSans,
-            keyboardType = KeyboardType.NumberPassword,
-            imeAction = ImeAction.Done,
-            onDone = ::submit,
-            showConfirm = password.isNotBlank(),
-            onConfirm = ::submit,
-            enabled = !isSubmitting,
-          )
+            Text(
+              text = "Use your current admin login to manage inventory, deals, and documents.",
+              color = Ink.copy(alpha = 0.66f),
+              style = TextStyle(
+                fontFamily = dmSans,
+                fontWeight = FontWeight.Normal,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+              ),
+            )
+
+            LoginField(
+              label = "User name",
+              labelImageRes = R.drawable.icon_username,
+              labelImageSize = 34.dp,
+              value = username,
+              onValueChange = {
+                username = it
+                error = null
+              },
+              showValue = showUser,
+              onToggleVisibility = { showUser = !showUser },
+              dmSans = dmSans,
+              keyboardType = KeyboardType.Text,
+              imeAction = ImeAction.Next,
+              enabled = !isSubmitting,
+            )
+
+            LoginField(
+              label = "Password",
+              labelImageRes = R.drawable.icon_password,
+              labelImageSize = 42.dp,
+              value = password,
+              onValueChange = {
+                password = it
+                error = null
+              },
+              showValue = showPass,
+              onToggleVisibility = { showPass = !showPass },
+              dmSans = dmSans,
+              keyboardType = KeyboardType.NumberPassword,
+              imeAction = ImeAction.Done,
+              onDone = ::submit,
+              showConfirm = false,
+              onConfirm = ::submit,
+              enabled = !isSubmitting,
+            )
+
+            Button(
+              onClick = ::submit,
+              enabled = !isSubmitting,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+              shape = RoundedCornerShape(18.dp),
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Accent,
+                contentColor = Color.White,
+                disabledContainerColor = Accent.copy(alpha = 0.45f),
+                disabledContentColor = Color.White.copy(alpha = 0.9f),
+              ),
+            ) {
+              Text(
+                text = if (isSubmitting) "Opening admin panel..." else "Open Admin Panel",
+                style = TextStyle(
+                  fontFamily = dmSans,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 17.sp,
+                ),
+              )
+            }
+
+            if (error != null) {
+              Text(
+                text = error!!,
+                color = Color(0xFFB00020),
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                  fontFamily = dmSans,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 14.sp,
+                ),
+              )
+            }
+
+            if (isSubmitting) {
+              Text(
+                text = "Please wait while the dashboard loads.",
+                color = LabelGreen,
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                  fontFamily = dmSans,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 14.sp,
+                ),
+              )
+            }
+          }
         }
 
-        if (error != null) {
-          Spacer(modifier = Modifier.height(12.dp))
-          Text(
-            text = error!!,
-            color = Color(0xFFB00020),
-            textAlign = TextAlign.Center,
-            style = TextStyle(
-              fontFamily = dmSans,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 14.sp,
-            ),
-          )
-        }
+        Spacer(modifier = Modifier.height(18.dp))
 
-        if (isSubmitting) {
-          Spacer(modifier = Modifier.height(12.dp))
-          Text(
-            text = "Opening admin panel...",
-            color = LabelGreen,
-            textAlign = TextAlign.Center,
-            style = TextStyle(
-              fontFamily = dmSans,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 14.sp,
-            ),
-          )
-        }
+        Text(
+          text = "Operational dashboard for products, OTC deals, documents, and client records.",
+          color = Ink.copy(alpha = 0.52f),
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = dmSans,
+            fontWeight = FontWeight.Normal,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+          ),
+        )
 
         Spacer(modifier = Modifier.height(72.dp))
       }
@@ -321,7 +408,7 @@ private fun LoginField(
     },
     textStyle = TextStyle(
       fontFamily = dmSans,
-      fontWeight = FontWeight.Thin,
+      fontWeight = FontWeight.Normal,
       fontSize = 18.sp,
       lineHeight = 22.sp,
       color = Ink,

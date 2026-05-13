@@ -64,8 +64,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App() {
   val scheme = lightColorScheme(
-    background = Color(0xFFF7F7F7),
-    surface = Color(0xFFF7F7F7),
+    primary = Color(0xFFE9782F),
+    secondary = Color(0xFF5E9655),
+    background = Color(0xFFF6F2EB),
+    surface = Color(0xFFFFFCF7),
     onBackground = Color(0xFF141414),
     onSurface = Color(0xFF141414),
   )

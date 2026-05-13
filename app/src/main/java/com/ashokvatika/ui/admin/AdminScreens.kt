@@ -168,12 +168,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Bg = Color(0xFFF7F7F7)
+private val Bg = Color(0xFFF6F2EB)
 private val Accent = BrandOrange
 private val Ink = Color(0xFF141414)
 private val AccentGreen = BrandGreen
 private val TileShadow = Color(0x2C9EA4AA)
 private val SoftGreyShadow = Color(0x24969CA6)
+private val Panel = Color(0xFFFFFCF7)
+private val PanelTint = Color(0xFFF7EFE4)
+private val PanelBorder = Color(0xFFE8DDCF)
 private val CardShape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
 private val UploadPill = Color(0x26FFFFFF)
 private val OtcHeaderActionSize = 54.dp
@@ -581,6 +584,20 @@ fun AdminHomeScreen(
         textSize = layout.brandTextSize,
         markSize = layout.brandMarkSize,
         fixedHeight = dashboardLogoHeight,
+      )
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      Text(
+        text = "Choose a workspace to manage products, OTC deals, documents, and art assets.",
+        color = Ink.copy(alpha = 0.68f),
+        textAlign = TextAlign.Center,
+        style = TextStyle(
+          fontFamily = dmSansThin,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 13.sp else 16.sp,
+          lineHeight = if (compactScreen) 18.sp else 22.sp,
+        ),
       )
 
       if (!syncMessage.isNullOrBlank()) {
@@ -3371,14 +3388,14 @@ fun InventoryListScreen(
               onValueChange = { searchQuery = it },
               fontFamily = dmSansThin,
               modifier = Modifier.fillMaxWidth(),
-              placeholder = "",
+              placeholder = "Search inventory",
             )
 
             AddInventoryButton(
               fontFamily = dmSansThin,
               onClick = onAddItem,
               modifier = Modifier.fillMaxWidth(),
-              label = "",
+              label = "Add item",
             )
           }
         } else {
@@ -3392,14 +3409,14 @@ fun InventoryListScreen(
               onValueChange = { searchQuery = it },
               fontFamily = dmSansThin,
               modifier = Modifier.weight(1f),
-              placeholder = "",
+              placeholder = "Search inventory",
             )
 
             AddInventoryButton(
               fontFamily = dmSansThin,
               onClick = onAddItem,
               modifier = Modifier.weight(1f),
-              label = "",
+              label = "Add item",
             )
           }
         }
@@ -3415,13 +3432,13 @@ fun InventoryListScreen(
             shadowElevation = 0.dp,
           ) {
             Text(
-              text = "No items added yet. Tap Add Item to create one.",
+              text = "No items added yet. Start by adding a product to build this inventory list.",
               modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
               textAlign = TextAlign.Center,
               color = Ink.copy(alpha = 0.62f),
               style = TextStyle(
                 fontFamily = dmSansThin,
-                fontWeight = FontWeight.Thin,
+                fontWeight = FontWeight.Normal,
                 fontSize = if (compactScreen) 16.sp else 20.sp,
                 lineHeight = if (compactScreen) 20.sp else 24.sp,
               ),
@@ -3719,9 +3736,15 @@ private fun AddInventoryButton(
     Surface(
       modifier = Modifier
         .fillMaxWidth()
+        .shadow(
+          elevation = 8.dp,
+          shape = CardShape,
+          ambientColor = SoftGreyShadow,
+          spotColor = SoftGreyShadow,
+        )
         .clickable(onClick = onClick),
       shape = CardShape,
-      color = Accent,
+      color = AccentGreen,
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
@@ -3738,7 +3761,7 @@ private fun AddInventoryButton(
             color = Color.White,
             style = TextStyle(
               fontFamily = fontFamily,
-              fontWeight = FontWeight.Normal,
+              fontWeight = FontWeight.SemiBold,
               fontSize = if (compactButton) 18.sp else 24.sp,
             ),
           )
@@ -3767,9 +3790,17 @@ private fun SearchInventoryField(
   BoxWithConstraints(modifier = modifier) {
     val compactField = maxWidth < 240.dp
     Surface(
-      modifier = Modifier.fillMaxWidth(),
+      modifier = Modifier
+        .fillMaxWidth()
+        .shadow(
+          elevation = 8.dp,
+          shape = CardShape,
+          ambientColor = SoftGreyShadow,
+          spotColor = SoftGreyShadow,
+        ),
       shape = CardShape,
-      color = Accent,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
@@ -3783,7 +3814,7 @@ private fun SearchInventoryField(
         Icon(
           imageVector = Icons.Filled.Search,
           contentDescription = "Search items",
-          tint = Color.White,
+          tint = Accent,
           modifier = Modifier.size(if (compactField) 22.dp else 26.dp),
         )
 
@@ -3792,18 +3823,18 @@ private fun SearchInventoryField(
           onValueChange = onValueChange,
           modifier = Modifier.fillMaxWidth(),
           singleLine = true,
-          cursorBrush = SolidColor(Color.White),
+          cursorBrush = SolidColor(Accent),
           textStyle = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
             fontSize = if (compactField) 18.sp else 24.sp,
-            color = Color.White,
+            color = Ink,
           ),
           decorationBox = { innerTextField ->
             if (value.isBlank() && placeholder.isNotBlank()) {
               Text(
                 text = placeholder,
-                color = Color.White.copy(alpha = 0.92f),
+                color = Ink.copy(alpha = 0.42f),
                 style = TextStyle(
                   fontFamily = fontFamily,
                   fontWeight = FontWeight.Normal,
@@ -3850,7 +3881,7 @@ private fun InventoryItemCard(
     Surface(
       modifier = Modifier.matchParentSize(),
       shape = CardShape,
-      color = Color(0xFFF8D9CC),
+      color = Color(0xFFF1E4D6),
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {}
@@ -3859,13 +3890,13 @@ private fun InventoryItemCard(
       modifier = Modifier
         .fillMaxWidth()
         .offset { IntOffset(swipeOffset.value.toInt(), 0) }
-        .shadow(
-          elevation = 10.dp,
+      .shadow(
+          elevation = 14.dp,
           shape = CardShape,
           ambientColor = SoftGreyShadow,
           spotColor = SoftGreyShadow,
         )
-        .pointerInput(item.id) {
+      .pointerInput(item.id) {
           detectHorizontalDragGestures(
             onDragStart = {
               dragConsumed = false
@@ -4954,7 +4985,8 @@ private fun OtcQuantityPopup(
     val previewSize = minOf(maxWidth * 0.52f, imageSize * 1.32f, 240.dp)
     Surface(
       shape = CardShape,
-      color = Color.White,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
@@ -5670,14 +5702,14 @@ fun OpenCartScreen(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         LabeledReadOnlyCard(
-          label = "",
+          label = "Cart total",
           value = "\u20B9 ${formatAmount(totalMrp)}",
           fontFamily = fontFamily,
           modifier = Modifier.weight(1f),
           valueFontSize = 48.sp,
         )
         ActionButtonCard(
-          title = "Proceed to Payment",
+          title = "Review Payment",
           color = AccentGreen,
           fontFamily = fontFamily,
           onClick = { showPaymentGateway = true },
@@ -5939,7 +5971,7 @@ fun SavedDealsScreen(
           value = searchQuery,
           onValueChange = { searchQuery = it },
           fontFamily = fontFamily,
-          placeholder = "",
+          placeholder = "Search closed deals",
         )
       }
 
@@ -6282,9 +6314,10 @@ private fun CompactDetailCard(
     val compactCard = maxWidth < 360.dp
     Surface(
       shape = CardShape,
-      color = Color.White,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
       tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
+      shadowElevation = 4.dp,
     ) {
       Column(
         modifier = Modifier.padding(horizontal = if (compactCard) 12.dp else 16.dp, vertical = if (compactCard) 8.dp else 10.dp),
@@ -6363,7 +6396,14 @@ private fun ActionButtonCard(
   modifier: Modifier = Modifier,
 ) {
   Surface(
-    modifier = modifier.clickable(onClick = onClick),
+    modifier = modifier
+      .shadow(
+        elevation = 10.dp,
+        shape = CardShape,
+        ambientColor = SoftGreyShadow,
+        spotColor = SoftGreyShadow,
+      )
+      .clickable(onClick = onClick),
     shape = CardShape,
     color = color,
     tonalElevation = 0.dp,
@@ -6380,7 +6420,7 @@ private fun ActionButtonCard(
         color = Color.White,
         style = TextStyle(
           fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
+          fontWeight = FontWeight.SemiBold,
           fontSize = 18.sp,
         ),
       )
@@ -6418,8 +6458,19 @@ private fun PaymentGatewayDialog(
           markSize = 58.dp,
         )
 
+        Text(
+          text = "Collect payment and confirm the final invoice for this deal.",
+          color = Ink.copy(alpha = 0.66f),
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+          ),
+        )
+
         LabeledReadOnlyCard(
-          label = "",
+          label = "Amount due",
           value = "\u20B9 ${formatAmount(totalAmount)}",
           fontFamily = fontFamily,
           valueFontSize = 28.sp,
@@ -6435,7 +6486,8 @@ private fun PaymentGatewayDialog(
         Surface(
           modifier = Modifier.fillMaxWidth(),
           shape = CardShape,
-          color = Color.White,
+          color = Panel,
+          border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
           tonalElevation = 0.dp,
           shadowElevation = 0.dp,
         ) {
@@ -6445,11 +6497,27 @@ private fun PaymentGatewayDialog(
               .padding(20.dp),
             contentAlignment = Alignment.Center,
           ) {
-            Image(
-              painter = painterResource(R.drawable.dummy_qr),
-              contentDescription = "Payment QR code",
-              modifier = Modifier.size(220.dp),
-            )
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              Image(
+                painter = painterResource(R.drawable.dummy_qr),
+                contentDescription = "Payment QR code",
+                modifier = Modifier.size(220.dp),
+              )
+              Text(
+                text = "Scan this code to complete payment before closing the deal.",
+                color = Ink.copy(alpha = 0.62f),
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 13.sp,
+                  lineHeight = 18.sp,
+                ),
+              )
+            }
           }
         }
 
@@ -6459,7 +6527,7 @@ private fun PaymentGatewayDialog(
           verticalAlignment = Alignment.CenterVertically,
         ) {
           ActionButtonCard(
-            title = "Close deal and download invoice",
+            title = "Close Deal and Download Invoice",
             color = AccentGreen,
             fontFamily = fontFamily,
             onClick = onCloseDealAndClearCart,
@@ -6548,9 +6616,10 @@ private fun LabeledReadOnlyCard(
     Surface(
       modifier = Modifier.fillMaxWidth(),
       shape = CardShape,
-      color = Color.White,
+      color = PanelTint,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
       tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
+      shadowElevation = 2.dp,
     ) {
       Column(
         modifier = Modifier.padding(horizontal = if (compactCard) 14.dp else 18.dp, vertical = if (compactCard) 10.dp else 14.dp),
@@ -6558,7 +6627,7 @@ private fun LabeledReadOnlyCard(
       ) {
         Text(
           text = label,
-          color = Ink.copy(alpha = 0.75f),
+          color = Ink.copy(alpha = 0.6f),
           style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = if (compactCard) 13.sp else 16.sp),
         )
         Text(
@@ -6566,7 +6635,7 @@ private fun LabeledReadOnlyCard(
           color = Ink,
           style = TextStyle(
             fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
+            fontWeight = FontWeight.SemiBold,
             fontSize = if (compactCard) (valueFontSize.value * 0.72f).sp else valueFontSize,
             lineHeight = if (compactCard) (valueFontSize.value * 0.8f).sp else valueFontSize * 1.1f,
           ),
@@ -6583,9 +6652,10 @@ private fun EmptyStateCard(
 ) {
   Surface(
     shape = CardShape,
-    color = Color.White,
+    color = Panel,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
     tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
+    shadowElevation = 2.dp,
   ) {
     Text(
       text = text,
@@ -6594,7 +6664,7 @@ private fun EmptyStateCard(
       textAlign = TextAlign.Center,
       style = TextStyle(
         fontFamily = fontFamily,
-        fontWeight = FontWeight.Thin,
+        fontWeight = FontWeight.Normal,
         fontSize = 18.sp,
         lineHeight = 22.sp,
       ),
@@ -6631,7 +6701,8 @@ private fun OpenCartDealRow(
         spotColor = SoftGreyShadow,
       ),
     shape = CardShape,
-    color = Color.White,
+    color = Panel,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
@@ -11877,7 +11948,11 @@ private fun CircleIconAction(
       .clickable(onClick = onClick),
     shape = CircleShape,
     color = backgroundColor,
-    border = if (borderWidth > 0.dp) androidx.compose.foundation.BorderStroke(borderWidth, borderColor) else null,
+    border = if (borderWidth > 0.dp) {
+      androidx.compose.foundation.BorderStroke(borderWidth, borderColor)
+    } else {
+      androidx.compose.foundation.BorderStroke(1.dp, PanelBorder.copy(alpha = 0.9f))
+    },
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
