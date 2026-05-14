@@ -6432,124 +6432,134 @@ private fun PaymentGatewayDialog(
   onCloseDealAndClearCart: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss) {
-    Surface(
-      modifier = Modifier.fillMaxWidth(0.94f),
-      shape = CardShape,
-      color = Color(0xFFFDF1E4),
-      tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
-    ) {
-      Column(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+    BoxWithConstraints {
+      val compactDialog = maxHeight < 860.dp
+      val qrSize = if (compactDialog) 180.dp else 220.dp
+      val dialogVerticalPadding = if (compactDialog) 14.dp else 18.dp
+      val dialogSpacing = if (compactDialog) 10.dp else 14.dp
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth(0.94f)
+          .heightIn(max = maxHeight * 0.9f),
+        shape = CardShape,
+        color = Color(0xFFFDF1E4),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
       ) {
-        AshokvatikaLogo(
-          modifier = Modifier.widthIn(max = 260.dp),
-          textSize = 28.sp,
-          markSize = 58.dp,
-        )
-
-        Text(
-          text = "Collect payment and confirm the final invoice for this deal.",
-          color = Ink.copy(alpha = 0.66f),
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
-          ),
-        )
-
-        LabeledReadOnlyCard(
-          label = "Amount due",
-          value = "\u20B9 ${formatAmount(totalAmount)}",
-          fontFamily = fontFamily,
-          valueFontSize = 28.sp,
-        )
-
-        CompactDetailCard(fontFamily = fontFamily) {
-          PaymentInfoLine("Client", clientName, fontFamily, labelImageRes = R.drawable.payment_client)
-          PaymentInfoLine("Phone", clientPhone, fontFamily, labelImageRes = R.drawable.payment_phone)
-          PaymentInfoLine("Client ID", clientId, fontFamily, labelImageRes = R.drawable.payment_client_id)
-          PaymentInfoLine("Transaction code", transactionCode, fontFamily, labelImageRes = R.drawable.payment_transaction_id)
-        }
-
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          shape = CardShape,
-          color = Panel,
-          border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
-          tonalElevation = 0.dp,
-          shadowElevation = 0.dp,
+        Column(
+          modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = dialogVerticalPadding),
+          verticalArrangement = Arrangement.spacedBy(dialogSpacing),
         ) {
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(20.dp),
-            contentAlignment = Alignment.Center,
-          ) {
-            Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-              Image(
-                painter = painterResource(R.drawable.dummy_qr),
-                contentDescription = "Payment QR code",
-                modifier = Modifier.size(220.dp),
-              )
-              Text(
-                text = "Scan this code to complete payment before closing the deal.",
-                color = Ink.copy(alpha = 0.62f),
-                textAlign = TextAlign.Center,
-                style = TextStyle(
-                  fontFamily = fontFamily,
-                  fontWeight = FontWeight.Normal,
-                  fontSize = 13.sp,
-                  lineHeight = 18.sp,
-                ),
-              )
-            }
-          }
-        }
-
-        ActionButtonCard(
-          title = "Closed Deals",
-          color = Accent,
-          fontFamily = fontFamily,
-          onClick = onOpenSavedDeals,
-          modifier = Modifier.fillMaxWidth(),
-        )
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          ActionButtonCard(
-            title = "Close Deal and Download Invoice",
-            color = AccentGreen,
-            fontFamily = fontFamily,
-            onClick = onCloseDealAndClearCart,
-            modifier = Modifier.weight(1f),
+          AshokvatikaLogo(
+            modifier = Modifier.widthIn(max = 260.dp),
+            textSize = 28.sp,
+            markSize = 58.dp,
           )
+
+          Text(
+            text = "Collect payment and confirm the final invoice for this deal.",
+            color = Ink.copy(alpha = 0.66f),
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = 14.sp,
+              lineHeight = 20.sp,
+            ),
+          )
+
+          LabeledReadOnlyCard(
+            label = "Amount due",
+            value = "\u20B9 ${formatAmount(totalAmount)}",
+            fontFamily = fontFamily,
+            valueFontSize = 28.sp,
+          )
+
+          CompactDetailCard(fontFamily = fontFamily) {
+            PaymentInfoLine("Client", clientName, fontFamily, labelImageRes = R.drawable.payment_client)
+            PaymentInfoLine("Phone", clientPhone, fontFamily, labelImageRes = R.drawable.payment_phone)
+            PaymentInfoLine("Client ID", clientId, fontFamily, labelImageRes = R.drawable.payment_client_id)
+            PaymentInfoLine("Transaction code", transactionCode, fontFamily, labelImageRes = R.drawable.payment_transaction_id)
+          }
+
           Surface(
-            modifier = Modifier
-              .size(64.dp)
-              .clickable(onClick = onOpenCart),
-            shape = CircleShape,
-            color = Color(0xFFF3BF47),
+            modifier = Modifier.fillMaxWidth(),
+            shape = CardShape,
+            color = Panel,
+            border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
           ) {
             Box(
-              modifier = Modifier.fillMaxSize(),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(if (compactDialog) 14.dp else 20.dp),
               contentAlignment = Alignment.Center,
             ) {
-              Icon(
-                imageVector = Icons.Filled.ShoppingCart,
-                contentDescription = "Open cart",
-                tint = Color.White,
-              )
+              Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(if (compactDialog) 8.dp else 12.dp),
+              ) {
+                Image(
+                  painter = painterResource(R.drawable.dummy_qr),
+                  contentDescription = "Payment QR code",
+                  modifier = Modifier.size(qrSize),
+                )
+                Text(
+                  text = "Scan this code to complete payment before closing the deal.",
+                  color = Ink.copy(alpha = 0.62f),
+                  textAlign = TextAlign.Center,
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                  ),
+                )
+              }
+            }
+          }
+
+          ActionButtonCard(
+            title = "Closed Deals",
+            color = Accent,
+            fontFamily = fontFamily,
+            onClick = onOpenSavedDeals,
+            modifier = Modifier.fillMaxWidth(),
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            ActionButtonCard(
+              title = "Close Deal and Download Invoice",
+              color = AccentGreen,
+              fontFamily = fontFamily,
+              onClick = onCloseDealAndClearCart,
+              modifier = Modifier.weight(1f),
+            )
+            Surface(
+              modifier = Modifier
+                .size(64.dp)
+                .clickable(onClick = onOpenCart),
+              shape = CircleShape,
+              color = Color(0xFFF3BF47),
+              tonalElevation = 0.dp,
+              shadowElevation = 0.dp,
+            ) {
+              Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.ShoppingCart,
+                  contentDescription = "Open cart",
+                  tint = Color.White,
+                )
+              }
             }
           }
         }
