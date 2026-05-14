@@ -5828,6 +5828,10 @@ fun OpenCartScreen(
         onOpenCart = {
           showPaymentGateway = false
         },
+        onOpenSavedDeals = {
+          showPaymentGateway = false
+          onOpenSavedDeals()
+        },
         onCloseDealAndClearCart = {
           showPaymentGateway = false
           if (rows.isNotEmpty()) {
@@ -6424,6 +6428,7 @@ private fun PaymentGatewayDialog(
   fontFamily: FontFamily,
   onDismiss: () -> Unit,
   onOpenCart: () -> Unit,
+  onOpenSavedDeals: () -> Unit,
   onCloseDealAndClearCart: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -6506,6 +6511,14 @@ private fun PaymentGatewayDialog(
             }
           }
         }
+
+        ActionButtonCard(
+          title = "Closed Deals",
+          color = Accent,
+          fontFamily = fontFamily,
+          onClick = onOpenSavedDeals,
+          modifier = Modifier.fillMaxWidth(),
+        )
 
         Row(
           modifier = Modifier.fillMaxWidth(),
