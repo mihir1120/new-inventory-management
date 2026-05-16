@@ -1,5 +1,6 @@
 package com.ashokvatika.notifications
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -32,6 +33,7 @@ object AdminApprovalNotifier {
     notificationManager.createNotificationChannel(channel)
   }
 
+  @SuppressLint("MissingPermission")
   fun showIncomingApproval(
     context: Context,
     requestId: String,
@@ -52,7 +54,7 @@ object AdminApprovalNotifier {
     )
 
     val notification = NotificationCompat.Builder(context, ApprovalChannelId)
-      .setSmallIcon(R.drawable.ic_launcher)
+      .setSmallIcon(R.mipmap.ic_launcher)
       .setContentTitle("Incoming customer call")
       .setContentText(
         if (customerPhone.isBlank()) customerName else "$customerName • $customerPhone",

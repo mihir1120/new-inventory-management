@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ashokvatika.data.AdminAccessRequest
+import com.ashokvatika.data.AdminAuthStore
 import com.ashokvatika.data.AdminFirestoreRepository
 import com.ashokvatika.notifications.AdminApprovalNotifier
 import com.ashokvatika.ui.admin.AdminHomeScreen
@@ -58,6 +59,9 @@ import com.ashokvatika.ui.admin.SavedDeal
 import com.ashokvatika.ui.admin.SavedDealsScreen
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
+import java.security.SecureRandom
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 private enum class Route {
@@ -85,16 +89,11 @@ fun AppRoot() {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val auth = remember { FirebaseAuth.getInstance() }
+  val authStore = remember(context) { AdminAuthStore(context.applicationContext) }
   val firestoreRepository = remember(context) { AdminFirestoreRepository(context.applicationContext) }
-  var route by remember {
-    mutableStateOf(
-      if (auth.currentUser != null) {
-        Route.AdminHome
-      } else {
-        Route.Landing
-      },
-    )
-  }
+  val isProvisioned = authStore.isProvisioned()
+  val hasPersistedSession = authStore.hasActiveSession()
+  var route by remember { mutableStateOf(Route.Landing) }
   var artBackRoute by remember { mutableStateOf(Route.AdminHome) }
   var activeInventory by remember { mutableStateOf(DashboardDestination.Plants) }
   var editingItemId by remember { mutableStateOf<String?>(null) }
@@ -115,6 +114,18 @@ fun AppRoot() {
   val hasFirebaseSession = auth.currentUser != null
   val cartItemCount = openCartRows.size
   LiveInventoryCatalog.inventoryByDestination = inventory.mapValues { entry -> entry.value.toList() }
+
+  LaunchedEffect(isProvisioned) {
+    if (!isProvisioned && hasPersistedSession) {
+      authStore.setActiveSession(false)
+    }
+  }
+
+  LaunchedEffect(hasFirebaseSession) {
+    if (hasFirebaseSession) {
+      authStore.setActiveSession(true)
+    }
+  }
 
   LaunchedEffect(pendingAccessRequests.firstOrNull()?.requestId) {
     val incomingRequest = pendingAccessRequests.firstOrNull() ?: return@LaunchedEffect
@@ -175,7 +186,7 @@ fun AppRoot() {
 
       onDispose {
         inventoryRegistration?.remove()
-        requestsRegistration?.remove()
+        requestsRegistration.remove()
         savedDealsRegistration?.remove()
       }
     }
@@ -190,7 +201,10 @@ fun AppRoot() {
   Box(modifier = Modifier.fillMaxSize()) {
     when (route) {
       Route.Landing -> LandingLoginScreen(
-        onLoggedIn = { route = Route.AdminHome },
+        onLoggedIn = {
+          authStore.setActiveSession(true)
+          route = Route.AdminHome
+        },
       )
 
       Route.AdminHome -> AdminHomeScreen(
@@ -600,5 +614,17 @@ private fun List<CartProductItem>.mergeCartItems(additions: List<CartProductItem
 }
 
 private fun generateTransactionCode(): String {
-  return "TX-${System.currentTimeMillis().toString().takeLast(6)}"
+  val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+  val randomSuffix = buildString {
+    repeat(6) {
+      append(TransactionCodeAlphabet[SecureRandomHolder.random.nextInt(TransactionCodeAlphabet.length)])
+    }
+  }
+  return "TX-$timestamp-$randomSuffix"
+}
+
+private const val TransactionCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+private object SecureRandomHolder {
+  val random = SecureRandom()
 }
