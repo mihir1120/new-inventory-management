@@ -93,7 +93,7 @@ fun AppRoot() {
   val firestoreRepository = remember(context) { AdminFirestoreRepository(context.applicationContext) }
   val isProvisioned = authStore.isProvisioned()
   val hasPersistedSession = authStore.hasActiveSession()
-  var route by remember { mutableStateOf(Route.Landing) }
+  var route by remember { mutableStateOf(Route.AdminHome) }
   var artBackRoute by remember { mutableStateOf(Route.AdminHome) }
   var activeInventory by remember { mutableStateOf(DashboardDestination.Plants) }
   var editingItemId by remember { mutableStateOf<String?>(null) }
@@ -125,6 +125,10 @@ fun AppRoot() {
     if (hasFirebaseSession) {
       authStore.setActiveSession(true)
     }
+  }
+
+  LaunchedEffect(Unit) {
+    authStore.setActiveSession(true)
   }
 
   LaunchedEffect(pendingAccessRequests.firstOrNull()?.requestId) {

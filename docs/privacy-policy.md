@@ -25,7 +25,7 @@ The App is **not directed to children under 13**. If you are under the age of di
 
 Depending on how the App is used, we may access or collect the following categories of information:
 
-- **App account and sign-in information:** limited administrator login inputs used to access protected areas of the App.
+- **App account and sign-in information:** limited administrator login inputs and first-launch administrator credential provisioning data used to access protected areas of the App.
 - **Inventory and business content:** product names, descriptions, stock details, pricing, media references, and related business records entered into the App.
 - **Customer and transaction details:** customer names, phone numbers, customer IDs, transaction codes, and saved deal information entered by authorized users.
 - **Access request records:** customer approval or access request details managed within the App.
@@ -60,7 +60,7 @@ We may share or process data in the following limited ways:
 We use reasonable administrative, technical, and organizational safeguards designed to protect data handled by the App. These measures include:
 
 - use of HTTPS/TLS-backed Google services where applicable;
-- restricted in-app admin access flow;
+- restricted in-app admin access flow with first-launch credential provisioning;
 - disabled Android backup for app data in release builds;
 - disabled cleartext traffic in release configuration;
 - release-build code shrinking and security-focused configuration.

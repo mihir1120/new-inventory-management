@@ -173,7 +173,10 @@ class AdminFirestoreRepository(
           "name" to item.name,
           "details" to item.details,
           "price" to item.price.orZero(),
-          "landingPrice" to item.checkout.orZero(),
+          "landingPrice" to item.landingPrice.orZero(),
+          "vendorName" to item.vendorName,
+          "vendorPhone" to item.vendorPhone,
+          "vendorEmail" to item.vendorEmail,
           "batch" to item.batch.orZero(),
           "sale" to item.sale.orZero(),
           "rent" to item.rent.orZero(),
@@ -182,7 +185,6 @@ class AdminFirestoreRepository(
           "checkout" to item.checkout.orZero(),
           "imageUri" to item.imageUri,
           "mediaUris" to item.mediaUris,
-          "imageBase64" to imageBase64,
           "qrCodeValue" to qrCodeValue,
           "templatePrimaryTitle" to item.templatePrimaryTitle,
           "templatePrimaryDescription" to item.templatePrimaryDescription,
@@ -334,7 +336,10 @@ private fun InventoryItem.toInventoryContentValues(
     put(LocalBridgeContract.Inventory.Name, name)
     put(LocalBridgeContract.Inventory.Details, details)
     put(LocalBridgeContract.Inventory.Price, price.orZero())
-    put(LocalBridgeContract.Inventory.LandingPrice, checkout.orZero())
+    put(LocalBridgeContract.Inventory.LandingPrice, landingPrice.orZero())
+    put(LocalBridgeContract.Inventory.VendorName, vendorName)
+    put(LocalBridgeContract.Inventory.VendorPhone, vendorPhone)
+    put(LocalBridgeContract.Inventory.VendorEmail, vendorEmail)
     put(LocalBridgeContract.Inventory.Batch, batch.orZero())
     put(LocalBridgeContract.Inventory.Sale, sale.orZero())
     put(LocalBridgeContract.Inventory.Rent, rent.orZero())
@@ -413,7 +418,11 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toInventoryItem(): In
     rent = getString("rent").orZero(),
     details = getString("details").orEmpty(),
     price = getString("price").orZero(),
+    landingPrice = getString("landingPrice").orZero(),
     checkout = getString("checkout").orZero(),
+    vendorName = getString("vendorName").orEmpty(),
+    vendorPhone = getString("vendorPhone").orEmpty(),
+    vendorEmail = getString("vendorEmail").orEmpty(),
     imageUri = getString("imageUri"),
     mediaUris = (get("mediaUris") as? List<*>)?.filterIsInstance<String>().orEmpty(),
     status = getString("status").orEmpty().ifBlank { "complete" },

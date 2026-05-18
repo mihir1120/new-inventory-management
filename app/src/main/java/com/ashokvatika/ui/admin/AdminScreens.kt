@@ -437,7 +437,11 @@ data class InventoryItem(
   val rent: String,
   val details: String,
   val price: String,
+  val landingPrice: String,
   val checkout: String,
+  val vendorName: String = "",
+  val vendorPhone: String = "",
+  val vendorEmail: String = "",
   val imageUri: String?,
   val mediaUris: List<String> = emptyList(),
   val status: String = "complete",
@@ -2488,10 +2492,10 @@ fun CategoryScreen(
   var checkoutText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.checkout) }
   var showDetailsPopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
   var showDetailsCalendar by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
-  var vendorNameText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var vendorPhoneText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var vendorEmailText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var landingPriceText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var vendorNameText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorName) }
+  var vendorPhoneText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorPhone) }
+  var vendorEmailText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorEmail) }
+  var landingPriceText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.landingPrice) }
   var othersText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
   var markupText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
   var selectedDetailsDate by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.details) }
@@ -2650,7 +2654,11 @@ fun CategoryScreen(
         detailsText = detailsText,
         selectedDetailsDate = selectedDetailsDate,
         unitPrice = unitPrice,
+        landingPrice = landingPriceText,
         checkoutDisplay = checkoutDisplay,
+        vendorName = vendorNameText,
+        vendorPhone = vendorPhoneText,
+        vendorEmail = vendorEmailText,
         selectedMediaUris = mediaUris,
         templatePrimaryTitle = mediaPrimaryTitleText,
         templatePrimaryDescription = mediaPrimaryDescriptionText,
@@ -2674,7 +2682,11 @@ fun CategoryScreen(
         detailsText = detailsText,
         selectedDetailsDate = selectedDetailsDate,
         unitPrice = unitPrice,
+        landingPrice = landingPriceText,
         checkoutDisplay = checkoutDisplay,
+        vendorName = vendorNameText,
+        vendorPhone = vendorPhoneText,
+        vendorEmail = vendorEmailText,
         selectedMediaUris = mediaUris,
         templatePrimaryTitle = mediaPrimaryTitleText,
         templatePrimaryDescription = mediaPrimaryDescriptionText,
@@ -2702,62 +2714,80 @@ fun CategoryScreen(
       ?.getInsets(WindowInsetsCompat.Type.statusBars())
       ?.top ?: 0
     val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
-    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 784.dp)
+    val tabletScreen = physicalTablet
+    val contentWidth = when {
+      phoneScreen -> maxWidth
+      tabletScreen -> minOf(maxWidth - 48.dp, 760.dp)
+      else -> minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 784.dp)
+    }
     val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
     val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
-    val topContentPadding = if (phoneScreen) maxHeight * 0.15f else 8.dp
+    val topContentPadding = when {
+      phoneScreen -> maxHeight * 0.15f
+      tabletScreen -> 120.dp
+      else -> 8.dp
+    }
     val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
     val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
     val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
     val circleSize = when {
+      tabletScreen -> minOf(356.dp, maxHeight * 0.30f)
       maxWidth > 1000.dp -> minOf(672.dp, maxHeight * 0.54f)
       maxWidth > 760.dp -> minOf(594.dp, maxHeight * 0.52f)
       compactScreen -> minOf(contentWidth * 0.82f, maxHeight * 0.33f, 320.dp)
       else -> minOf(contentWidth * 0.96f, maxHeight * 0.48f, 456.dp)
     }
     val statCardHeight = when {
+      tabletScreen -> 88.dp
       compactScreen -> 84.dp
       maxHeight > 760.dp -> 124.dp
       maxHeight > 680.dp -> 112.dp
       else -> 100.dp
     }
     val statValueSize = when {
+      tabletScreen -> 28.sp
       compactScreen -> 33.sp
       maxHeight > 760.dp -> 51.sp
       maxHeight > 680.dp -> 46.5.sp
       else -> 42.sp
     }
     val statValueLineHeight = when {
+      tabletScreen -> 32.sp
       compactScreen -> 36.sp
       maxHeight > 760.dp -> 57.sp
       maxHeight > 680.dp -> 52.5.sp
       else -> 48.sp
     }
-    val statGap = if (compactScreen) 6.dp else 8.dp
+    val statGap = if (tabletScreen) 6.dp else if (compactScreen) 6.dp else 8.dp
     val topSpacing = when {
+      tabletScreen -> 2.dp
       compactScreen -> 4.dp
       maxHeight > 780.dp -> 12.dp
       else -> 8.dp
     }
     val topBarTextSize = when {
+      tabletScreen -> 30.sp
       maxWidth > 700.dp -> 34.sp
       compactScreen -> 22.sp
       phoneScreen -> OtcPhoneHeaderLogoTextSize
       else -> 28.sp
     }
     val topBarMarkSize = when {
+      tabletScreen -> 68.dp
       maxWidth > 700.dp -> 76.dp
       compactScreen -> 46.dp
       phoneScreen -> OtcPhoneHeaderLogoMarkSize
       else -> 60.dp
     }
     val editorTitleSize = when {
+      tabletScreen -> 28.sp
       compactScreen -> 24.sp
       phoneScreen -> 28.sp
       else -> 36.sp
     }
-    val stockLabelSize = if (phoneScreen) 12.sp else 14.sp
+    val stockLabelSize = if (phoneScreen) 12.sp else if (tabletScreen) 13.sp else 14.sp
     val headlineSize = when {
+      tabletScreen -> 36.sp
       compactScreen -> 42.sp
       phoneScreen -> 45.sp
       else -> 54.sp
@@ -2767,14 +2797,15 @@ fun CategoryScreen(
       modifier = Modifier
         .width(contentWidth)
         .align(Alignment.TopCenter)
-        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 8.dp)
-        .verticalScroll(rememberScrollState()),
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = if (tabletScreen) 0.dp else 8.dp)
+        .then(if (tabletScreen) Modifier else Modifier.verticalScroll(rememberScrollState())),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Spacer(modifier = Modifier.height(topSpacing))
 
       Box(
         modifier = Modifier
+          .offset(y = if (tabletScreen) 8.dp else 0.dp)
           .size(circleSize)
           .shadow(
             elevation = 18.dp,
@@ -2902,7 +2933,7 @@ fun CategoryScreen(
         }
       }
 
-      Spacer(modifier = Modifier.height(4.dp))
+      Spacer(modifier = Modifier.height(if (tabletScreen) 14.dp else 4.dp))
 
       InlineEditor(
         value = productName,
@@ -3338,7 +3369,7 @@ fun InventoryListScreen(
     val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
     val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
     val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
-    val topContentPadding = if (phoneScreen) maxHeight * 0.20f else 12.dp
+    val topContentPadding = if (phoneScreen) maxHeight * 0.20f else OtcMainContentTopPadding
     val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
     val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
     val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
@@ -5413,7 +5444,7 @@ private fun OtcCarouselCard(
           }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+      Spacer(modifier = Modifier.height(4.dp))
 
         Column(
           modifier = Modifier
@@ -5942,7 +5973,11 @@ fun SavedDealsScreen(
     }
     val headerLogoMarkSize = if (phoneScreen) OtcPhoneHeaderLogoMarkSize else 60.dp
     val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
-    val contentTopPadding = headerTopPadding + headerContainerHeight + if (compactScreen) 4.dp else 14.dp
+    val contentTopPadding = if (phoneScreen) {
+      headerTopPadding + 82.dp
+    } else {
+      headerTopPadding + headerContainerHeight + if (compactScreen) 4.dp else 14.dp
+    }
     LazyColumn(
       modifier = Modifier
         .width(contentWidth)
@@ -6576,6 +6611,7 @@ private fun PaymentInfoLine(
   labelImageRes: Int? = null,
   labelTint: Color? = null,
 ) {
+  val labelWidth = if (labelImageRes != null) 56.dp else 132.dp
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -6584,7 +6620,7 @@ private fun PaymentInfoLine(
     if (labelImageRes != null) {
       Box(
         modifier = Modifier
-          .width(132.dp)
+          .width(labelWidth)
           .height(24.dp),
         contentAlignment = Alignment.CenterStart,
       ) {
@@ -6593,13 +6629,16 @@ private fun PaymentInfoLine(
           contentDescription = label,
           contentScale = ContentScale.Fit,
           colorFilter = labelTint?.let { ColorFilter.tint(it) },
-          modifier = Modifier.fillMaxSize(),
+          modifier = Modifier
+            .align(Alignment.CenterStart)
+            .fillMaxHeight()
+            .widthIn(max = labelWidth),
         )
       }
     } else {
       Text(
         text = "$label :",
-        modifier = Modifier.width(132.dp),
+        modifier = Modifier.width(labelWidth),
         color = Ink.copy(alpha = 0.75f),
         style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
       )
@@ -11981,7 +12020,11 @@ private data class ProductDetail(
   val rent: String,
   val details: String,
   val price: String,
+  val landingPrice: String = "",
   val checkout: String = "",
+  val vendorName: String = "",
+  val vendorPhone: String = "",
+  val vendorEmail: String = "",
   val imageUri: String? = null,
   val mediaUris: List<String> = emptyList(),
   val templatePrimaryTitle: String = "",
@@ -12035,7 +12078,7 @@ private fun otcCatalog(): List<OtcCarouselItem> {
           .joinToString("") { it.take(1).uppercase(Locale.US) }
           .ifBlank { item.name.take(2).uppercase(Locale.US) },
         price = item.price.orZero(),
-        landingPrice = item.checkout.orZero(),
+        landingPrice = item.landingPrice.orZero(),
         imageUri = item.mediaUris.firstOrNull() ?: item.imageUri,
       )
     }
@@ -12487,7 +12530,11 @@ private fun InventoryItem.toProductDetail(): ProductDetail {
     rent = rent,
     details = details,
     price = price,
+    landingPrice = landingPrice,
     checkout = checkout,
+    vendorName = vendorName,
+    vendorPhone = vendorPhone,
+    vendorEmail = vendorEmail,
     imageUri = imageUri,
     mediaUris = mediaUris.ifEmpty { listOfNotNull(imageUri) },
     templatePrimaryTitle = templatePrimaryTitle,
@@ -12509,7 +12556,11 @@ private fun buildInventoryItem(
   detailsText: String,
   selectedDetailsDate: String,
   unitPrice: Int,
+  landingPrice: String,
   checkoutDisplay: String,
+  vendorName: String,
+  vendorPhone: String,
+  vendorEmail: String,
   selectedMediaUris: List<String>,
   templatePrimaryTitle: String,
   templatePrimaryDescription: String,
@@ -12528,7 +12579,11 @@ private fun buildInventoryItem(
     rent = rentText.ifBlank { "0" },
     details = if (detailsText.isBlank()) selectedDetailsDate else detailsText,
     price = unitPrice.toString(),
+    landingPrice = landingPrice.filter(Char::isDigit).orZero(),
     checkout = checkoutDisplay.filter(Char::isDigit),
+    vendorName = vendorName.trim(),
+    vendorPhone = vendorPhone.filter(Char::isDigit),
+    vendorEmail = vendorEmail.trim(),
     imageUri = primaryMediaUri,
     mediaUris = selectedMediaUris,
     status = status,

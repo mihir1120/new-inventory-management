@@ -127,17 +127,17 @@ Suggested improvements:
 
 ## 3. App And Product Improvements
 
-### A. Replace hardcoded admin login immediately
+### A. Continue hardening admin login
 
 Current observation:
 
-- `LandingLoginScreen.kt` still contains hardcoded admin credentials (`admin` / `123`).
+- The app now provisions an administrator PIN on first launch instead of shipping default credentials, but it still relies on a local device credential rather than centrally managed admin accounts.
 
 Recommendation:
 
-- Move login fully to Firebase Auth or `AdminAuthStore`.
-- Remove seeded credentials from the UI state.
-- Add rate limiting, lockout messaging, and auditable admin account management.
+- Keep the local provisioning flow for controlled installs only if needed.
+- Prefer moving production admin access fully to Firebase Auth or another centrally managed admin identity system.
+- Preserve rate limiting and add auditable admin account management before broad rollout.
 
 Priority: Critical
 
@@ -255,7 +255,7 @@ Priority: Medium
 
 ### Phase 1: Immediate fixes
 
-- Remove hardcoded login.
+- Replace local-only admin access with a production identity plan.
 - Block unverified payment closure.
 - Persist cart and draft deal state.
 - Fix landing-price and vendor persistence.

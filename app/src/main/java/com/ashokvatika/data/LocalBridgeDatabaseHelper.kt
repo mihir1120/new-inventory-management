@@ -67,6 +67,21 @@ class LocalBridgeDatabaseHelper(
     addColumnIfMissing(
       db,
       LocalBridgeContract.Inventory.Table,
+      LocalBridgeContract.Inventory.VendorName,
+    )
+    addColumnIfMissing(
+      db,
+      LocalBridgeContract.Inventory.Table,
+      LocalBridgeContract.Inventory.VendorPhone,
+    )
+    addColumnIfMissing(
+      db,
+      LocalBridgeContract.Inventory.Table,
+      LocalBridgeContract.Inventory.VendorEmail,
+    )
+    addColumnIfMissing(
+      db,
+      LocalBridgeContract.Inventory.Table,
       LocalBridgeContract.Inventory.TemplatePrimaryTitle,
     )
     addColumnIfMissing(
@@ -117,6 +132,9 @@ class LocalBridgeDatabaseHelper(
         ${LocalBridgeContract.Inventory.Details} TEXT,
         ${LocalBridgeContract.Inventory.Price} TEXT,
         ${LocalBridgeContract.Inventory.LandingPrice} TEXT,
+        ${LocalBridgeContract.Inventory.VendorName} TEXT,
+        ${LocalBridgeContract.Inventory.VendorPhone} TEXT,
+        ${LocalBridgeContract.Inventory.VendorEmail} TEXT,
         ${LocalBridgeContract.Inventory.Batch} TEXT,
         ${LocalBridgeContract.Inventory.Sale} TEXT,
         ${LocalBridgeContract.Inventory.Rent} TEXT,

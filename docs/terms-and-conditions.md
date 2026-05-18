@@ -23,7 +23,7 @@ The App is **not intended for children under 13**. If you are between 13 and 17 
 
 You are responsible for ensuring that only authorized users access protected parts of the App.
 
-At the current stage of deployment, the App may use a temporary administrator login flow for internal or controlled operations. You are responsible for keeping device access restricted while temporary credentials are in use.
+The App requires an administrator PIN to be provisioned on first launch for each fresh install. You are responsible for keeping that credential and the device itself restricted to authorized users.
 
 ## 3. Account and Credential Responsibility
 

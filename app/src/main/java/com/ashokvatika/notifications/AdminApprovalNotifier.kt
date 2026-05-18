@@ -1,7 +1,7 @@
 package com.ashokvatika.notifications
 
-import android.annotation.SuppressLint
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -53,12 +53,16 @@ object AdminApprovalNotifier {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    val notificationText = if (customerPhone.isBlank()) {
+      customerName
+    } else {
+      "$customerName - $customerPhone"
+    }
+
     val notification = NotificationCompat.Builder(context, ApprovalChannelId)
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentTitle("Incoming customer call")
-      .setContentText(
-        if (customerPhone.isBlank()) customerName else "$customerName • $customerPhone",
-      )
+      .setContentText(notificationText)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setAutoCancel(true)
