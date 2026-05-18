@@ -35,8 +35,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare Gradle wrapper
+        run: |
+          sed -i 's/\r$//' gradlew
+          chmod +x gradlew
+
       - name: Verify Android release gates
-        run: sh ./gradlew lint test assembleRelease bundleRelease --stacktrace
+        run: ./gradlew lint test assembleRelease bundleRelease --stacktrace
 
       - name: Upload Android verification reports
         if: always()
