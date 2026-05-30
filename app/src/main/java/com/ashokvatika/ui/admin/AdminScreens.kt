@@ -6,6 +6,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.util.LruCache
 import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -152,6 +153,8 @@ import com.ashokvatika.app.R
 import com.ashokvatika.config.AppExperimentManager
 import com.ashokvatika.config.GalleryShareSheetVariant
 import com.ashokvatika.data.AdminAccessRequest
+import com.ashokvatika.data.LiveCartPlant
+import com.ashokvatika.data.LiveCustomerSession
 import com.ashokvatika.ui.components.AshokvatikaLogo
 import com.ashokvatika.ui.components.BrandButtonGlyph
 import com.ashokvatika.ui.components.BrandButtonIcon
@@ -167,6 +170,8 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 
 private val Bg = Color(0xFFF6F2EB)
 private val Accent = BrandOrange
@@ -224,6 +229,7 @@ enum class DashboardDestination(
   Supplies("Supplies"),
   Pots("Pots"),
   Docs("Docs"),
+  Live("Live"),
   Art("Art"),
 }
 
@@ -572,7 +578,7 @@ fun AdminHomeScreen(
       ),
       listOf(
         DashboardTileItem(DashboardDestination.Docs, BrandButtonIcon.Docs, 520),
-        DashboardTileItem(DashboardDestination.Art, BrandButtonIcon.Art, 640),
+        DashboardTileItem(DashboardDestination.Live, BrandButtonIcon.Live, 640),
       ),
     )
 
@@ -921,6 +927,725 @@ fun ArtHomeScreen(
       actionTopPadding = header.actionTopPadding,
     )
   }
+}
+
+@Composable
+fun LiveHomeScreen(
+  onBack: () -> Unit,
+  liveSessions: List<LiveCustomerSession>,
+  syncMessage: String?,
+) {
+  val fontFamily = rememberDashboardFont()
+  val scrollState = rememberScrollState()
+  val activeSessions = liveSessions.count { it.isLoggedIn }
+  val plantsInCarts = liveSessions.sumOf { session ->
+    session.cartItems.sumOf { item -> item.quantity.coerceAtLeast(1) }
+  }
+  val latestSync = liveSessions
+    .maxByOrNull { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+    ?.updatedAt
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val topContentPadding =
+      header.headerTopPadding + header.actionButtonSize + if (compactScreen) 6.dp else 10.dp
+    val liveLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val liveLogoHeight = (liveLogoWidth / 4.92f).coerceAtLeast(50.dp)
+    val sectionSpacing = if (compactScreen) 10.dp else 12.dp
+
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .verticalScroll(scrollState)
+        .padding(top = topContentPadding, bottom = if (compactScreen) 20.dp else 28.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(sectionSpacing),
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+        fixedHeight = liveLogoHeight,
+      )
+
+      if (!syncMessage.isNullOrBlank() || !latestSync.isNullOrBlank()) {
+        Text(
+          text = syncMessage ?: "Last synced ${formatLiveUiTimestamp(latestSync)}",
+          modifier = Modifier.width(layout.contentWidth),
+          color = if (!syncMessage.isNullOrBlank()) Accent else AccentGreen,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 14.sp else 15.sp,
+          ),
+        )
+      }
+
+      Row(
+        modifier = Modifier.width(layout.contentWidth),
+        horizontalArrangement = Arrangement.spacedBy(sectionSpacing),
+      ) {
+        LiveSummaryCard(
+          modifier = Modifier.weight(1f),
+          title = "Active now",
+          value = activeSessions.toString(),
+          caption = if (activeSessions == 1) "customer logged in" else "customers logged in",
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+        )
+        LiveSummaryCard(
+          modifier = Modifier.weight(1f),
+          title = "Plants in carts",
+          value = plantsInCarts.toString(),
+          caption = if (plantsInCarts == 1) "plant selected" else "plants selected",
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+        )
+      }
+
+      if (liveSessions.isEmpty()) {
+        Surface(
+          modifier = Modifier.width(layout.contentWidth),
+          shape = CardShape,
+          color = Color.White,
+          tonalElevation = 0.dp,
+          shadowElevation = 0.dp,
+        ) {
+          Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Text(
+              text = "Waiting for customer app sync",
+              color = Ink,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = if (compactScreen) 22.sp else 25.sp,
+              ),
+            )
+            Text(
+              text = "Once the customer app writes session data, this page will show login state, session time, and the plants added to cart.",
+              color = Ink.copy(alpha = 0.68f),
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = if (compactScreen) 15.sp else 17.sp,
+                lineHeight = if (compactScreen) 20.sp else 22.sp,
+              ),
+            )
+          }
+        }
+      } else {
+        Column(
+          modifier = Modifier.width(layout.contentWidth),
+          verticalArrangement = Arrangement.spacedBy(sectionSpacing),
+        ) {
+          liveSessions.forEach { session ->
+            LiveSessionCard(
+              session = session,
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+              phoneScreen = phoneScreen,
+            )
+          }
+        }
+      }
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+private fun LiveSummaryCard(
+  modifier: Modifier = Modifier,
+  title: String,
+  value: String,
+  caption: String,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = CardShape,
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Text(
+        text = title,
+        color = Ink.copy(alpha = 0.62f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+      Text(
+        text = value,
+        color = Accent,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 28.sp else 34.sp,
+        ),
+      )
+      Text(
+        text = caption,
+        color = Ink.copy(alpha = 0.62f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 13.sp else 14.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveSessionCard(
+  session: LiveCustomerSession,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+  phoneScreen: Boolean,
+) {
+  var expanded by rememberSaveable(session.sessionId) { mutableStateOf(false) }
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+    color = Color.White,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    BoxWithConstraints(
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      val cardPadding = if (compactScreen) 18.dp else 22.dp
+      val previewSpacing = if (compactScreen) 14.dp else 18.dp
+      val previewSize = if (compactScreen) 74.dp else 88.dp
+      val metricWidth = if (phoneScreen) minOf(maxWidth * 0.34f, 132.dp) else 156.dp
+      val metricHeight = if (compactScreen) 102.dp else 116.dp
+      val totalPlants = session.cartItems.sumOf { it.quantity.coerceAtLeast(1) }
+      val sessionDuration = formatLiveSessionDuration(
+        sessionStartedAt = session.sessionStartedAt,
+        lastSeenAt = if (session.isLoggedIn) null else session.lastSeenAt ?: session.updatedAt,
+      )
+
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = cardPadding, vertical = cardPadding),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.Top,
+        ) {
+          LiveSessionIdentity(
+            session = session,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+          )
+          LiveStatusPill(
+            isLoggedIn = session.isLoggedIn,
+            fontFamily = fontFamily,
+          )
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(previewSpacing),
+          verticalAlignment = Alignment.Top,
+        ) {
+          LiveSessionMetricPanel(
+            modifier = Modifier
+              .width(metricWidth)
+              .height(metricHeight),
+            expanded = expanded,
+            sessionDuration = sessionDuration,
+            totalPlants = totalPlants,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+          )
+
+          if (session.cartItems.isEmpty()) {
+            LiveEmptyCartPanel(
+              modifier = Modifier
+                .weight(1f)
+                .height(metricHeight),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+          } else {
+            Row(
+              modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(previewSpacing),
+              verticalAlignment = Alignment.Top,
+            ) {
+              session.cartItems.forEach { item ->
+                LiveCartPreviewItem(
+                  item = item,
+                  fontFamily = fontFamily,
+                  compactScreen = compactScreen,
+                  previewSize = previewSize,
+                )
+              }
+            }
+          }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          LiveMoreButton(
+            expanded = expanded,
+            fontFamily = fontFamily,
+            onClick = { expanded = !expanded },
+          )
+        }
+
+        if (expanded) {
+          Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            LiveDetailLine(
+              label = "Session started",
+              value = formatLiveUiTimestamp(session.sessionStartedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+            LiveDetailLine(
+              label = "Last seen",
+              value = formatLiveUiTimestamp(session.lastSeenAt ?: session.updatedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+            LiveDetailLine(
+              label = "Cart updated",
+              value = formatLiveUiTimestamp(session.cartUpdatedAt ?: session.updatedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LiveSessionIdentity(
+  session: LiveCustomerSession,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Column(
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Text(
+      text = session.customerName.ifBlank { "Customer" },
+      color = Ink,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 22.sp else 26.sp,
+      ),
+    )
+    val secondary = listOfNotNull(
+      session.customerPhone.takeIf { it.isNotBlank() },
+      session.customerId.takeIf { it.isNotBlank() }?.let { "ID $it" },
+    ).joinToString(" | ")
+    if (secondary.isNotBlank()) {
+      Text(
+        text = secondary,
+        color = Accent.copy(alpha = 0.76f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveStatusPill(
+  isLoggedIn: Boolean,
+  fontFamily: FontFamily,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = if (isLoggedIn) AccentGreen.copy(alpha = 0.14f) else Accent.copy(alpha = 0.12f),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Text(
+      text = if (isLoggedIn) "Logged in" else "Logged out",
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+      color = if (isLoggedIn) AccentGreen else Accent,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveMoreButton(
+  expanded: Boolean,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+    modifier = Modifier.clickable(onClick = onClick),
+  ) {
+    Text(
+      text = if (expanded) "Less" else "More",
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+      color = Accent,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveSessionMetricPanel(
+  modifier: Modifier = Modifier,
+  expanded: Boolean,
+  sessionDuration: String,
+  totalPlants: Int,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 14.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(
+        text = if (expanded) sessionDuration else if (totalPlants == 0) "Cart" else "Cart $totalPlants",
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 23.sp else 28.sp,
+        ),
+      )
+      Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          text = if (expanded) "Session time" else "Tap more to view time",
+          color = Ink.copy(alpha = 0.7f),
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 12.sp else 13.sp,
+          ),
+        )
+        Text(
+          text = if (totalPlants == 1) "1 plant in cart" else "$totalPlants plants in cart",
+          color = Accent.copy(alpha = 0.78f),
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 11.sp else 12.sp,
+          ),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun LiveEmptyCartPanel(
+  modifier: Modifier = Modifier,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+    color = Color(0xFFFFFCF7),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 16.dp, vertical = 14.dp),
+      verticalArrangement = Arrangement.Center,
+      horizontalAlignment = Alignment.Start,
+    ) {
+      Text(
+        text = "Plants in cart",
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 16.sp else 18.sp,
+        ),
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        text = "No plants have been added yet.",
+        color = Ink.copy(alpha = 0.6f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 13.sp else 14.sp,
+          lineHeight = if (compactScreen) 18.sp else 19.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveCartPreviewItem(
+  item: LiveCartPlant,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+  previewSize: Dp,
+) {
+  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 720)
+  Column(
+    modifier = Modifier.widthIn(min = previewSize, max = previewSize + 12.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Box(
+      modifier = Modifier
+        .size(previewSize)
+        .clip(CircleShape)
+        .background(Accent),
+        contentAlignment = Alignment.Center,
+    ) {
+      if (imageBitmap != null) {
+        Image(
+          bitmap = imageBitmap!!,
+          contentDescription = item.plantName,
+          contentScale = ContentScale.Crop,
+          modifier = Modifier.fillMaxSize(),
+        )
+      } else {
+        Text(
+          text = liveCartInitials(item.plantName),
+          color = Color.White,
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Thin,
+            fontSize = if (compactScreen) 18.sp else 20.sp,
+            lineHeight = if (compactScreen) 18.sp else 20.sp,
+          ),
+        )
+      }
+    }
+
+    Text(
+      text = item.plantName.ifBlank { "Plant" },
+      maxLines = 2,
+      textAlign = TextAlign.Center,
+      color = Ink,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+        lineHeight = if (compactScreen) 16.sp else 17.sp,
+      ),
+    )
+    Text(
+      text = "Qty ${item.quantity.coerceAtLeast(1)}",
+      color = Ink.copy(alpha = 0.62f),
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 13.sp else 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveDetailLine(
+  label: String,
+  value: String,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      text = label,
+      color = Ink.copy(alpha = 0.58f),
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+      ),
+    )
+    Spacer(modifier = Modifier.width(12.dp))
+    Text(
+      text = value,
+      color = Ink,
+      textAlign = TextAlign.End,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveCartItemRow(
+  itemName: String,
+  quantity: Int,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    shape = CircleShape,
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = itemName.ifBlank { "Plant" },
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+      Text(
+        text = "x${quantity.coerceAtLeast(1)}",
+        color = Accent,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+    }
+  }
+}
+
+private fun liveCartInitials(name: String): String {
+  val words = name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+  if (words.isEmpty()) return "PL"
+  return words.take(2).joinToString("") { it.take(1) }.uppercase(Locale.US)
+}
+
+private fun formatLiveUiTimestamp(value: String?): String {
+  val timestamp = parseLiveUiTimestampMillis(value) ?: return "Not available"
+  return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date(timestamp))
+}
+
+private fun formatLiveSessionDuration(
+  sessionStartedAt: String?,
+  lastSeenAt: String?,
+): String {
+  val start = parseLiveUiTimestampMillis(sessionStartedAt) ?: return "Not available"
+  val end = parseLiveUiTimestampMillis(lastSeenAt) ?: System.currentTimeMillis()
+  val diff = (end - start).coerceAtLeast(0L)
+  val hours = diff / 3_600_000L
+  val minutes = (diff % 3_600_000L) / 60_000L
+  val seconds = (diff % 60_000L) / 1000L
+  return when {
+    hours > 0L -> "${hours}h ${minutes}m"
+    minutes > 0L -> "${minutes}m ${seconds}s"
+    else -> "${seconds}s"
+  }
+}
+
+private fun parseLiveUiTimestampMillis(value: String?): Long? {
+  val raw = value?.trim().orEmpty()
+  if (raw.isBlank()) return null
+  raw.toLongOrNull()?.let { numeric ->
+    return if (numeric > 1000000000000L) numeric else numeric * 1000L
+  }
+  val patterns = listOf(
+    "yyyy-MM-dd'T'HH:mm:ss.SSSX" to null,
+    "yyyy-MM-dd'T'HH:mm:ssX" to null,
+    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd'T'HH:mm:ss'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd HH:mm:ss" to null,
+    "dd-MM-yyyy HH:mm:ss" to null,
+  )
+  patterns.forEach { (pattern, timeZone) ->
+    runCatching {
+      SimpleDateFormat(pattern, Locale.US).apply {
+        if (timeZone != null) {
+          this.timeZone = timeZone
+        }
+      }.parse(raw)?.time
+    }.getOrNull()?.let { return it }
+  }
+  return null
 }
 
 @Composable
@@ -4841,7 +5566,6 @@ fun OtcScreen(
         )
       },
     )
-
   }
 }
 
@@ -5879,7 +6603,7 @@ fun OpenCartScreen(
             runCatching {
               PendingInvoiceExport(
                 fileName = buildInvoiceFileName(closedDeal),
-                pdfBytes = buildInvoicePdf(closedDeal),
+                pdfBytes = buildInvoicePdf(context, closedDeal),
               )
             }.onSuccess { export ->
               pendingInvoiceExport = export
@@ -7611,7 +8335,7 @@ private fun SavedDealCard(
         runCatching {
           PendingInvoiceExport(
             fileName = buildInvoiceFileName(deal),
-            pdfBytes = buildInvoicePdf(deal),
+            pdfBytes = buildInvoicePdf(context, deal),
           )
         }.onSuccess { export ->
           pendingInvoiceExport = export
@@ -8620,7 +9344,7 @@ private fun BottomShareSheet(
   Surface(
     modifier = modifier
       .fillMaxWidth()
-      .offset(y = offsetY),
+      .offset { IntOffset(x = 0, y = offsetY.roundToPx()) },
     shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     color = Color.White,
     tonalElevation = 0.dp,
@@ -12068,6 +12792,7 @@ private fun otcCatalog(): List<OtcCarouselItem> {
           DashboardDestination.Supplies -> OtcCarouselCategory.Supplies
           DashboardDestination.OTC -> OtcCarouselCategory.Plant
           DashboardDestination.Docs -> OtcCarouselCategory.Plant
+          DashboardDestination.Live -> OtcCarouselCategory.Plant
           DashboardDestination.Art -> OtcCarouselCategory.Plant
         },
         name = item.name,
@@ -12181,6 +12906,14 @@ private fun detailFor(destination: DashboardDestination): ProductDetail {
       details = "",
       price = "",
     )
+    DashboardDestination.Live -> ProductDetail(
+      name = "Product Name",
+      batch = "",
+      sale = "",
+      rent = "",
+      details = "",
+      price = "",
+    )
     DashboardDestination.Art -> ProductDetail(
       name = "Product Name",
       batch = "",
@@ -12263,13 +12996,17 @@ private fun rememberDecodedImage(
   maxDimensionPx: Int = 1280,
 ): State<ImageBitmap?> {
   val context = LocalContext.current
-  return produceState<ImageBitmap?>(initialValue = null, uriString, maxDimensionPx) {
+  val cacheKey = remember(uriString, maxDimensionPx) { uriString?.let { "$it|$maxDimensionPx" } }
+  return produceState<ImageBitmap?>(initialValue = null, cacheKey) {
     value = if (uriString.isNullOrBlank()) {
       null
     } else {
-      withContext(Dispatchers.IO) {
-        decodeImageBitmap(context, uriString.toUri(), maxDimensionPx)
-      }
+      val cachedBitmap = cacheKey?.let { DecodedBitmapCache.get(it) }
+      (cachedBitmap ?: withContext(Dispatchers.IO) {
+        decodeImageBitmap(context, uriString.toUri(), maxDimensionPx)?.also { decoded ->
+          cacheKey?.let { DecodedBitmapCache.put(it, decoded) }
+        }
+      })?.asImageBitmap()
     }
   }
 }
@@ -12278,7 +13015,7 @@ private fun decodeImageBitmap(
   context: android.content.Context,
   uri: Uri,
   maxDimensionPx: Int,
-): ImageBitmap? {
+): Bitmap? {
   return try {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
       val source = ImageDecoder.createSource(context.contentResolver, uri)
@@ -12296,7 +13033,7 @@ private fun decodeImageBitmap(
             )
           }
         }
-      }.asImageBitmap()
+      }
     } else {
       val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
       context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -12310,7 +13047,7 @@ private fun decodeImageBitmap(
         )
       }
       context.contentResolver.openInputStream(uri)?.use { stream ->
-        BitmapFactory.decodeStream(stream, null, sampledOptions)?.asImageBitmap()
+        BitmapFactory.decodeStream(stream, null, sampledOptions)
       }
     }
   } catch (_: IOException) {
@@ -12332,6 +13069,26 @@ private fun calculateInSampleSize(
     sampleSize *= 2
   }
   return sampleSize.coerceAtLeast(1)
+}
+
+private object DecodedBitmapCache {
+  private val cache = object : LruCache<String, Bitmap>(
+    (Runtime.getRuntime().maxMemory() / 16L).coerceAtMost(32L * 1024 * 1024).toInt(),
+  ) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+  }
+
+  fun get(key: String): Bitmap? = synchronized(cache) { cache.get(key) }
+
+  fun put(key: String, bitmap: Bitmap) {
+    synchronized(cache) {
+      cache.put(key, bitmap)
+    }
+  }
+}
+
+private object MediaTypeCache {
+  val videoTypes = ConcurrentHashMap<String, Boolean>()
 }
 
 @Composable
@@ -12451,12 +13208,16 @@ private fun isVideoUri(
   context: android.content.Context,
   uriString: String,
 ): Boolean {
-  return try {
-    val uri = uriString.toUri()
-    val contentType = context.contentResolver.getType(uri).orEmpty()
-    contentType.startsWith("video/") || uriString.substringAfterLast('.', "").lowercase(Locale.US) in setOf("mp4", "mov", "m4v", "avi", "mkv", "webm")
-  } catch (_: Exception) {
-    false
+  return MediaTypeCache.videoTypes[uriString] ?: run {
+    val isVideo = try {
+      val uri = uriString.toUri()
+      val contentType = context.contentResolver.getType(uri).orEmpty()
+      contentType.startsWith("video/") || uriString.substringAfterLast('.', "").lowercase(Locale.US) in setOf("mp4", "mov", "m4v", "avi", "mkv", "webm")
+    } catch (_: Exception) {
+      false
+    }
+    MediaTypeCache.videoTypes[uriString] = isVideo
+    isVideo
   }
 }
 

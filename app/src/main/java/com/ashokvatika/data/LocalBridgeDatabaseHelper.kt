@@ -24,11 +24,13 @@ class LocalBridgeDatabaseHelper(
       )
       """.trimIndent(),
     )
+    db.execSQL(createLiveSessionsTableSql())
   }
 
   override fun onOpen(db: SQLiteDatabase) {
     super.onOpen(db)
     ensureAccessRequestTable(db)
+    ensureLiveSessionsTable(db)
     ensureInventoryColumns(db)
   }
 
@@ -42,6 +44,9 @@ class LocalBridgeDatabaseHelper(
     }
     if (oldVersion < 3) {
       ensureAccessRequestTable(db)
+    }
+    if (oldVersion < 4) {
+      ensureLiveSessionsTable(db)
     }
   }
 
@@ -61,6 +66,10 @@ class LocalBridgeDatabaseHelper(
       )
       """.trimIndent(),
     )
+  }
+
+  private fun ensureLiveSessionsTable(db: SQLiteDatabase) {
+    db.execSQL(createLiveSessionsTableSql())
   }
 
   private fun ensureInventoryColumns(db: SQLiteDatabase) {
@@ -104,6 +113,11 @@ class LocalBridgeDatabaseHelper(
       LocalBridgeContract.Inventory.Table,
       LocalBridgeContract.Inventory.TemplateContact,
     )
+    addColumnIfMissing(
+      db,
+      LocalBridgeContract.Inventory.Table,
+      LocalBridgeContract.Inventory.MediaUrisJson,
+    )
   }
 
   private fun addColumnIfMissing(
@@ -142,6 +156,7 @@ class LocalBridgeDatabaseHelper(
         ${LocalBridgeContract.Inventory.Status} TEXT,
         ${LocalBridgeContract.Inventory.Checkout} TEXT,
         ${LocalBridgeContract.Inventory.ImageUri} TEXT,
+        ${LocalBridgeContract.Inventory.MediaUrisJson} TEXT,
         ${LocalBridgeContract.Inventory.ImageBase64} TEXT,
         ${LocalBridgeContract.Inventory.QrCodeValue} TEXT,
         ${LocalBridgeContract.Inventory.TemplatePrimaryTitle} TEXT,
@@ -154,8 +169,27 @@ class LocalBridgeDatabaseHelper(
     """.trimIndent()
   }
 
+  private fun createLiveSessionsTableSql(): String {
+    return """
+      CREATE TABLE IF NOT EXISTS ${LocalBridgeContract.LiveSessions.Table} (
+        ${LocalBridgeContract.LiveSessions.SessionId} TEXT PRIMARY KEY,
+        ${LocalBridgeContract.LiveSessions.CustomerId} TEXT,
+        ${LocalBridgeContract.LiveSessions.CustomerName} TEXT NOT NULL,
+        ${LocalBridgeContract.LiveSessions.CustomerPhone} TEXT,
+        ${LocalBridgeContract.LiveSessions.IsLoggedIn} INTEGER NOT NULL DEFAULT 0,
+        ${LocalBridgeContract.LiveSessions.SessionStartedAt} TEXT,
+        ${LocalBridgeContract.LiveSessions.LastSeenAt} TEXT,
+        ${LocalBridgeContract.LiveSessions.CartUpdatedAt} TEXT,
+        ${LocalBridgeContract.LiveSessions.CartItemsJson} TEXT,
+        ${LocalBridgeContract.LiveSessions.CartItemCount} INTEGER NOT NULL DEFAULT 0,
+        ${LocalBridgeContract.LiveSessions.CartPlantSummary} TEXT,
+        ${LocalBridgeContract.LiveSessions.UpdatedAt} TEXT
+      )
+    """.trimIndent()
+  }
+
   private companion object {
     const val DatabaseName = "ashokvatika_local_bridge.db"
-    const val DatabaseVersion = 3
+    const val DatabaseVersion = 5
   }
 }

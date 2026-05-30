@@ -16,6 +16,8 @@ Ashokvatika is now instrumented for Firebase Remote Config based A/B testing.
 - Experiments are only honored when both:
   - `BuildConfig.ENABLE_EXPERIMENTS` is `true`
   - Remote Config parameter `experiments_enabled` is `true`
+- Debug builds now ship with `BuildConfig.ENABLE_EXPERIMENTS = true` for safe validation.
+- Release builds still keep experiments disabled until a production rollout is intentionally approved.
 
 ## Firebase setup steps
 

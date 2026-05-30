@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.ashokvatika.data.AdminAccessRequest
 import com.ashokvatika.data.AdminAuthStore
 import com.ashokvatika.data.AdminFirestoreRepository
+import com.ashokvatika.data.LiveCustomerSession
 import com.ashokvatika.notifications.AdminApprovalNotifier
 import com.ashokvatika.ui.admin.AdminHomeScreen
 import com.ashokvatika.ui.admin.ArtHomeScreen
@@ -51,6 +52,7 @@ import com.ashokvatika.ui.admin.DocsHomeScreen
 import com.ashokvatika.ui.admin.InventoryItem
 import com.ashokvatika.ui.admin.InventoryListScreen
 import com.ashokvatika.ui.admin.LetterheadScreen
+import com.ashokvatika.ui.admin.LiveHomeScreen
 import com.ashokvatika.ui.admin.LiveInventoryCatalog
 import com.ashokvatika.ui.admin.OpenCartRow
 import com.ashokvatika.ui.admin.OpenCartScreen
@@ -68,6 +70,7 @@ private enum class Route {
   Landing,
   AdminHome,
   DocsHome,
+  Live,
   ArtHome,
   ArtBrochure,
   ArtCatTwo,
@@ -93,7 +96,11 @@ fun AppRoot() {
   val firestoreRepository = remember(context) { AdminFirestoreRepository(context.applicationContext) }
   val isProvisioned = authStore.isProvisioned()
   val hasPersistedSession = authStore.hasActiveSession()
-  var route by remember { mutableStateOf(Route.AdminHome) }
+  var route by rememberSaveable(isProvisioned, hasPersistedSession) {
+    mutableStateOf(
+      if (isProvisioned && hasPersistedSession) Route.AdminHome else Route.Landing,
+    )
+  }
   var artBackRoute by remember { mutableStateOf(Route.AdminHome) }
   var activeInventory by remember { mutableStateOf(DashboardDestination.Plants) }
   var editingItemId by remember { mutableStateOf<String?>(null) }
@@ -102,6 +109,8 @@ fun AppRoot() {
   }
   val pendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
   var adminSyncMessage by remember { mutableStateOf<String?>(null) }
+  val liveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
+  var liveSyncMessage by remember { mutableStateOf<String?>(null) }
   val openCartRows = remember { mutableStateListOf<OpenCartRow>() }
   val savedDeals = remember { mutableStateListOf<SavedDeal>() }
   var cartRowCounter by remember { mutableIntStateOf(1) }
@@ -114,6 +123,7 @@ fun AppRoot() {
   val hasFirebaseSession = auth.currentUser != null
   val cartItemCount = openCartRows.size
   LiveInventoryCatalog.inventoryByDestination = inventory.mapValues { entry -> entry.value.toList() }
+  val currentInventorySnapshot = inventory.values.flatten()
 
   LaunchedEffect(isProvisioned) {
     if (!isProvisioned && hasPersistedSession) {
@@ -125,10 +135,6 @@ fun AppRoot() {
     if (hasFirebaseSession) {
       authStore.setActiveSession(true)
     }
-  }
-
-  LaunchedEffect(Unit) {
-    authStore.setActiveSession(true)
   }
 
   LaunchedEffect(pendingAccessRequests.firstOrNull()?.requestId) {
@@ -144,25 +150,36 @@ fun AppRoot() {
     lastNotifiedRequestId = incomingRequest.requestId
   }
 
+  LaunchedEffect(currentInventorySnapshot) {
+    runCatching {
+      firestoreRepository.publishInventorySnapshotLocally(currentInventorySnapshot)
+    }.onFailure { error ->
+      adminSyncMessage = "Inventory bridge sync error: ${error.message ?: "Unable to publish local inventory."}"
+    }
+  }
+
   if (route != Route.Landing) {
     DisposableEffect(firestoreRepository) {
-      val inventoryRegistration = if (hasFirebaseSession) {
-        firestoreRepository.observeInventory(
-          onUpdate = { liveItems ->
-            adminSyncMessage = null
-            val grouped = liveItems.groupBy { item -> item.category }
-            inventory.clear()
-            grouped.forEach { (destination, items) ->
-              inventory[destination] = items
-            }
-          },
-          onError = { error ->
-            adminSyncMessage = "Inventory sync error: ${error.message ?: "Unable to connect to Firebase."}"
-          },
-        )
-      } else {
-        null
-      }
+      val inventoryBridgeRegistration = firestoreRepository.observeBridgeInventory(
+        onUpdate = { cachedItems ->
+          val grouped = cachedItems.groupBy { item -> item.category }
+          inventory.clear()
+          grouped.forEach { (destination, items) ->
+            inventory[destination] = items
+          }
+        },
+        onError = { error ->
+          adminSyncMessage = "Inventory load error: ${error.message ?: "Unable to read saved inventory."}"
+        },
+      )
+      val inventoryRegistration = firestoreRepository.observeInventory(
+        onUpdate = {
+          adminSyncMessage = null
+        },
+        onError = { error ->
+          adminSyncMessage = "Inventory sync error: ${error.message ?: "Unable to connect to Firebase."}"
+        },
+      )
       val requestsRegistration = firestoreRepository.observePendingAccessRequests(
         onUpdate = { requests ->
           adminSyncMessage = null
@@ -173,25 +190,44 @@ fun AppRoot() {
           adminSyncMessage = "Approval sync error: ${error.message ?: "Unable to connect to Firebase."}"
         },
       )
-      val savedDealsRegistration = if (hasFirebaseSession) {
-        firestoreRepository.observeSavedDeals(
-          onUpdate = { deals ->
-            adminSyncMessage = null
-            savedDeals.clear()
-            savedDeals.addAll(deals)
-          },
-          onError = { error ->
-            adminSyncMessage = "OTC sync error: ${error.message ?: "Unable to connect to Firebase."}"
-          },
-        )
-      } else {
-        null
-      }
+      val savedDealsRegistration = firestoreRepository.observeSavedDeals(
+        onUpdate = { deals ->
+          adminSyncMessage = null
+          savedDeals.clear()
+          savedDeals.addAll(deals)
+        },
+        onError = { error ->
+          adminSyncMessage = "OTC sync error: ${error.message ?: "Unable to connect to Firebase."}"
+        },
+      )
+      val liveBridgeRegistration = firestoreRepository.observeBridgeLiveCustomerSessions(
+        onUpdate = { sessions ->
+          liveSyncMessage = null
+          liveCustomerSessions.clear()
+          liveCustomerSessions.addAll(sessions)
+        },
+        onError = { error ->
+          liveSyncMessage = "Live sync error: ${error.message ?: "Unable to load customer sessions."}"
+        },
+      )
+      val liveRemoteRegistration = firestoreRepository.observeLiveCustomerSessions(
+        onUpdate = { sessions ->
+          liveSyncMessage = null
+          liveCustomerSessions.clear()
+          liveCustomerSessions.addAll(sessions)
+        },
+        onError = { error ->
+          liveSyncMessage = "Live sync error: ${error.message ?: "Unable to connect to Firebase."}"
+        },
+      )
 
       onDispose {
-        inventoryRegistration?.remove()
+        inventoryBridgeRegistration.remove()
+        inventoryRegistration.remove()
         requestsRegistration.remove()
-        savedDealsRegistration?.remove()
+        savedDealsRegistration.remove()
+        liveRemoteRegistration.remove()
+        liveBridgeRegistration.remove()
       }
     }
   }
@@ -218,8 +254,11 @@ fun AppRoot() {
         onDenyRequest = { requestId -> handleRequestDecision(requestId, false) },
         onTileClick = { destination ->
           when (destination) {
-            DashboardDestination.OTC -> route = Route.Otc
+            DashboardDestination.OTC -> {
+              route = Route.Otc
+            }
             DashboardDestination.Docs -> route = Route.DocsHome
+            DashboardDestination.Live -> route = Route.Live
             DashboardDestination.Art -> {
               artBackRoute = Route.AdminHome
               route = Route.ArtHome
@@ -231,6 +270,12 @@ fun AppRoot() {
             }
           }
         },
+      )
+
+      Route.Live -> LiveHomeScreen(
+        onBack = { route = Route.AdminHome },
+        liveSessions = liveCustomerSessions,
+        syncMessage = liveSyncMessage,
       )
 
       Route.DocsHome -> DocsHomeScreen(
@@ -444,25 +489,20 @@ fun AppRoot() {
             editingItemId = item.id
             route = Route.InventoryEditor
           },
-          onDeleteItem = { item ->
-            if (!hasFirebaseSession) {
-              inventory[activeInventory] = inventory[activeInventory].orEmpty().filterNot { it.id == item.id }
-              if (editingItemId == item.id) editingItemId = null
-              return@InventoryListScreen
+        onDeleteItem = { item ->
+          inventory[activeInventory] = inventory[activeInventory].orEmpty().filterNot { it.id == item.id }
+          if (editingItemId == item.id) editingItemId = null
+          scope.launch {
+            runCatching {
+              firestoreRepository.deleteInventoryItem(item.id)
+            }.onSuccess {
+              adminSyncMessage = null
+            }.onFailure { error ->
+              adminSyncMessage = "Delete failed: ${error.message ?: "Item could not be removed from Firebase."}"
             }
-            scope.launch {
-              runCatching {
-                firestoreRepository.deleteInventoryItem(item.id)
-              }.onSuccess {
-                inventory[activeInventory] = inventory[activeInventory].orEmpty().filterNot { it.id == item.id }
-                adminSyncMessage = null
-              }.onFailure { error ->
-                adminSyncMessage = "Delete failed: ${error.message ?: "Item could not be removed from Firebase."}"
-              }
-            }
-            if (editingItemId == item.id) editingItemId = null
-          },
-        )
+          }
+        },
+      )
       }
 
       Route.InventoryEditor -> {
@@ -475,7 +515,6 @@ fun AppRoot() {
             editingItemId = item.id
             adminSyncMessage = null
             route = Route.InventoryList
-            if (!hasFirebaseSession) return@CategoryScreen
             scope.launch {
               runCatching {
                 firestoreRepository.upsertInventoryItem(item)
@@ -491,7 +530,6 @@ fun AppRoot() {
             editingItemId = item.id
             adminSyncMessage = null
             route = Route.InventoryList
-            if (!hasFirebaseSession) return@CategoryScreen
             scope.launch {
               runCatching {
                 firestoreRepository.upsertInventoryItem(item)

@@ -3,8 +3,7 @@
   xmlns:app="http://schemas.android.com/apk/res-auto"
   android:id="@+id/otcRoot"
   android:layout_width="match_parent"
-  android:layout_height="match_parent"
-  android:background="#E6E9EE">
+  android:layout_height="match_parent">
 
   <androidx.constraintlayout.widget.ConstraintLayout
     android:id="@+id/otcHeader"
@@ -90,6 +89,7 @@
       android:gravity="end"
       android:orientation="vertical"
       android:paddingStart="16dp"
+      android:paddingEnd="0dp"
       android:paddingTop="10dp"
       android:paddingBottom="10dp"
       app:layout_constraintBottom_toBottomOf="parent"

@@ -22,7 +22,7 @@ android {
       isMinifyEnabled = false
       isShrinkResources = false
       buildConfigField("boolean", "ENABLE_SCREENSHOT_PROTECTION", "false")
-      buildConfigField("boolean", "ENABLE_EXPERIMENTS", "false")
+      buildConfigField("boolean", "ENABLE_EXPERIMENTS", "true")
       buildConfigField("String", "RELEASE_CHANNEL", "\"debug\"")
     }
 

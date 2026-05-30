@@ -25,14 +25,19 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.tasks.await
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 private const val AccessRequestsCollection = "access_requests"
 private const val InventoryCollection = "inventory_items"
 private const val SavedDealsCollection = "saved_deals"
+private const val LiveSessionsCollection = "customer_live_sessions"
 private const val ProductQrPrefix = "ashokvatika://product/"
 private const val BridgeLogTag = "LocalBridgeSync"
 
@@ -45,6 +50,26 @@ data class AdminAccessRequest(
   val createdAt: String,
   val updatedAt: String? = null,
   val note: String? = null,
+)
+
+data class LiveCartPlant(
+  val itemId: String,
+  val plantName: String,
+  val quantity: Int,
+  val imageUri: String? = null,
+)
+
+data class LiveCustomerSession(
+  val sessionId: String,
+  val customerId: String,
+  val customerName: String,
+  val customerPhone: String,
+  val isLoggedIn: Boolean,
+  val sessionStartedAt: String? = null,
+  val lastSeenAt: String? = null,
+  val cartUpdatedAt: String? = null,
+  val updatedAt: String,
+  val cartItems: List<LiveCartPlant> = emptyList(),
 )
 
 class LocalBridgeObservation(
@@ -60,6 +85,7 @@ class AdminFirestoreRepository(
 ) {
   private val firestore by lazy { Firebase.firestore }
   private val realtimeDatabase by lazy { Firebase.database.reference.child(AccessRequestsCollection) }
+  private val liveSessionsDatabase by lazy { Firebase.database.reference.child(LiveSessionsCollection) }
 
   fun observeInventory(
     onUpdate: (List<InventoryItem>) -> Unit,
@@ -111,6 +137,37 @@ class AdminFirestoreRepository(
     }
   }
 
+  fun observeLiveCustomerSessions(
+    onUpdate: (List<LiveCustomerSession>) -> Unit,
+    onError: (Throwable) -> Unit,
+  ): LocalBridgeObservation {
+    val listener = object : ValueEventListener {
+      override fun onDataChange(snapshot: DataSnapshot) {
+        val sessions = snapshot.children
+          .mapNotNull { child -> child.toLiveCustomerSession() }
+          .sortedWith(
+            compareByDescending<LiveCustomerSession> { it.isLoggedIn }
+              .thenByDescending { it.updatedAt.timestampSortKey() }
+              .thenBy { it.customerName.lowercase(Locale.US) },
+          )
+        runCatching {
+          replaceLiveSessionsBridgeSnapshot(sessions)
+        }.onFailure { error ->
+          Log.w(BridgeLogTag, "Unable to mirror live customer sessions locally", error)
+        }
+        onUpdate(sessions)
+      }
+
+      override fun onCancelled(error: DatabaseError) {
+        onError(error.toException())
+      }
+    }
+    liveSessionsDatabase.addValueEventListener(listener)
+    return LocalBridgeObservation {
+      liveSessionsDatabase.removeEventListener(listener)
+    }
+  }
+
   fun observeBridgePendingAccessRequests(
     onUpdate: (List<AdminAccessRequest>) -> Unit,
     onError: (Throwable) -> Unit,
@@ -130,6 +187,62 @@ class AdminFirestoreRepository(
         observer,
       )
       onUpdate(loadBridgePendingAccessRequests())
+      LocalBridgeObservation {
+        context.contentResolver.unregisterContentObserver(observer)
+      }
+    }.getOrElse { error ->
+      onError(error)
+      LocalBridgeObservation {}
+    }
+  }
+
+  fun observeBridgeInventory(
+    onUpdate: (List<InventoryItem>) -> Unit,
+    onError: (Throwable) -> Unit,
+  ): LocalBridgeObservation {
+    val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+      override fun onChange(selfChange: Boolean) {
+        runCatching {
+          loadBridgeInventory()
+        }.onSuccess(onUpdate).onFailure(onError)
+      }
+    }
+
+    return runCatching {
+      context.contentResolver.registerContentObserver(
+        LocalBridgeContract.Inventory.ContentUri,
+        true,
+        observer,
+      )
+      onUpdate(loadBridgeInventory())
+      LocalBridgeObservation {
+        context.contentResolver.unregisterContentObserver(observer)
+      }
+    }.getOrElse { error ->
+      onError(error)
+      LocalBridgeObservation {}
+    }
+  }
+
+  fun observeBridgeLiveCustomerSessions(
+    onUpdate: (List<LiveCustomerSession>) -> Unit,
+    onError: (Throwable) -> Unit,
+  ): LocalBridgeObservation {
+    val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+      override fun onChange(selfChange: Boolean) {
+        runCatching {
+          loadBridgeLiveCustomerSessions()
+        }.onSuccess(onUpdate).onFailure(onError)
+      }
+    }
+
+    return runCatching {
+      context.contentResolver.registerContentObserver(
+        LocalBridgeContract.LiveSessions.ContentUri,
+        true,
+        observer,
+      )
+      onUpdate(loadBridgeLiveCustomerSessions())
       LocalBridgeObservation {
         context.contentResolver.unregisterContentObserver(observer)
       }
@@ -164,6 +277,14 @@ class AdminFirestoreRepository(
     val qrCodeValue = "${ProductQrPrefix}${item.id}"
     val imageBase64 = resolvePreviewImageBase64(item, context.contentResolver)
 
+    upsertInventoryBridgeItem(
+      item = item,
+      updatedAt = timestamp,
+      stockCount = stockCount,
+      imageBase64 = imageBase64,
+      qrCodeValue = qrCodeValue,
+    )
+
     firestore.collection(InventoryCollection)
       .document(item.id)
       .set(
@@ -195,6 +316,14 @@ class AdminFirestoreRepository(
         ),
       )
       .await()
+  }
+
+  suspend fun cacheInventoryItem(item: InventoryItem) {
+    val timestamp = currentTimestamp()
+    val stockCount =
+      ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
+    val qrCodeValue = "${ProductQrPrefix}${item.id}"
+    val imageBase64 = resolvePreviewImageBase64(item, context.contentResolver)
     upsertInventoryBridgeItem(
       item = item,
       updatedAt = timestamp,
@@ -202,6 +331,10 @@ class AdminFirestoreRepository(
       imageBase64 = imageBase64,
       qrCodeValue = qrCodeValue,
     )
+  }
+
+  fun publishInventorySnapshotLocally(items: List<InventoryItem>) {
+    replaceInventoryBridgeSnapshot(items)
   }
 
   suspend fun upsertSavedDeal(deal: SavedDeal) {
@@ -240,10 +373,14 @@ class AdminFirestoreRepository(
   }
 
   suspend fun deleteInventoryItem(itemId: String) {
+    context.contentResolver.delete(LocalBridgeContract.Inventory.itemUri(itemId), null, null)
     firestore.collection(InventoryCollection)
       .document(itemId)
       .delete()
       .await()
+  }
+
+  suspend fun deleteInventoryItemLocally(itemId: String) {
     context.contentResolver.delete(LocalBridgeContract.Inventory.itemUri(itemId), null, null)
   }
 
@@ -289,6 +426,18 @@ class AdminFirestoreRepository(
       )
     }
   }
+
+  private fun replaceLiveSessionsBridgeSnapshot(sessions: List<LiveCustomerSession>) {
+    val resolver = context.contentResolver
+    resolver.delete(LocalBridgeContract.LiveSessions.ContentUri, null, null)
+    sessions.forEach { session ->
+      resolver.insert(
+        LocalBridgeContract.LiveSessions.itemUri(session.sessionId),
+        session.toLiveSessionContentValues(),
+      )
+    }
+  }
+
   private fun upsertInventoryBridgeItem(
     item: InventoryItem,
     updatedAt: String,
@@ -322,6 +471,48 @@ class AdminFirestoreRepository(
       }
     }.orEmpty().filter { it.status == "pending" }
   }
+
+  private fun loadBridgeInventory(): List<InventoryItem> {
+    return context.contentResolver.query(
+      LocalBridgeContract.Inventory.ContentUri,
+      null,
+      null,
+      null,
+      "${LocalBridgeContract.Inventory.UpdatedAt} DESC",
+    )?.use { cursor ->
+      buildList {
+        while (cursor.moveToNext()) {
+          cursor.toBridgeInventoryItem()?.let(::add)
+        }
+      }
+    }.orEmpty()
+      .sortedWith(
+        compareBy<InventoryItem> { it.category.title }
+          .thenByDescending { it.id.inventorySequence() }
+          .thenBy { it.name.lowercase(Locale.US) },
+      )
+  }
+
+  private fun loadBridgeLiveCustomerSessions(): List<LiveCustomerSession> {
+    return context.contentResolver.query(
+      LocalBridgeContract.LiveSessions.ContentUri,
+      null,
+      null,
+      null,
+      "${LocalBridgeContract.LiveSessions.UpdatedAt} DESC",
+    )?.use { cursor ->
+      buildList {
+        while (cursor.moveToNext()) {
+          cursor.toBridgeLiveCustomerSession()?.let(::add)
+        }
+      }
+    }.orEmpty()
+      .sortedWith(
+        compareByDescending<LiveCustomerSession> { it.isLoggedIn }
+          .thenByDescending { it.updatedAt.timestampSortKey() }
+          .thenBy { it.customerName.lowercase(Locale.US) },
+      )
+  }
 }
 
 private fun InventoryItem.toInventoryContentValues(
@@ -347,6 +538,7 @@ private fun InventoryItem.toInventoryContentValues(
     put(LocalBridgeContract.Inventory.Status, status)
     put(LocalBridgeContract.Inventory.Checkout, checkout.orZero())
     put(LocalBridgeContract.Inventory.ImageUri, imageUri)
+    put(LocalBridgeContract.Inventory.MediaUrisJson, mediaUris.toStringListJson())
     put(LocalBridgeContract.Inventory.ImageBase64, imageBase64)
     put(LocalBridgeContract.Inventory.QrCodeValue, qrCodeValue)
     put(LocalBridgeContract.Inventory.TemplatePrimaryTitle, templatePrimaryTitle)
@@ -371,6 +563,23 @@ private fun AdminAccessRequest.toAccessRequestContentValues(): ContentValues {
   }
 }
 
+private fun LiveCustomerSession.toLiveSessionContentValues(): ContentValues {
+  return ContentValues().apply {
+    put(LocalBridgeContract.LiveSessions.SessionId, sessionId)
+    put(LocalBridgeContract.LiveSessions.CustomerId, customerId)
+    put(LocalBridgeContract.LiveSessions.CustomerName, customerName.ifBlank { "Customer" })
+    put(LocalBridgeContract.LiveSessions.CustomerPhone, customerPhone)
+    put(LocalBridgeContract.LiveSessions.IsLoggedIn, if (isLoggedIn) 1 else 0)
+    put(LocalBridgeContract.LiveSessions.SessionStartedAt, sessionStartedAt)
+    put(LocalBridgeContract.LiveSessions.LastSeenAt, lastSeenAt)
+    put(LocalBridgeContract.LiveSessions.CartUpdatedAt, cartUpdatedAt)
+    put(LocalBridgeContract.LiveSessions.CartItemsJson, cartItems.toCartItemsJson())
+    put(LocalBridgeContract.LiveSessions.CartItemCount, cartItems.sumOf { it.quantity.coerceAtLeast(0) })
+    put(LocalBridgeContract.LiveSessions.CartPlantSummary, cartItems.toCartPlantSummary())
+    put(LocalBridgeContract.LiveSessions.UpdatedAt, updatedAt)
+  }
+}
+
 private fun Cursor.toBridgeAccessRequest(): AdminAccessRequest? {
   val requestId = getStringOrEmpty(LocalBridgeContract.AccessRequests.RequestId)
   if (requestId.isBlank()) return null
@@ -387,6 +596,61 @@ private fun Cursor.toBridgeAccessRequest(): AdminAccessRequest? {
   )
 }
 
+private fun Cursor.toBridgeInventoryItem(): InventoryItem? {
+  val category = getStringOrEmpty(LocalBridgeContract.Inventory.Category).toDashboardDestination() ?: return null
+  val id = getStringOrEmpty(LocalBridgeContract.Inventory.Id)
+  val name = getStringOrEmpty(LocalBridgeContract.Inventory.Name)
+  if (id.isBlank() || name.isBlank()) return null
+
+  val imageUri = getOptionalString(LocalBridgeContract.Inventory.ImageUri)
+  val mediaUris = parseStringListJson(getOptionalString(LocalBridgeContract.Inventory.MediaUrisJson))
+    .ifEmpty { listOfNotNull(imageUri) }
+
+  return InventoryItem(
+    id = id,
+    category = category,
+    name = name,
+    batch = getStringOrEmpty(LocalBridgeContract.Inventory.Batch).orZero(),
+    sale = getStringOrEmpty(LocalBridgeContract.Inventory.Sale).orZero(),
+    rent = getStringOrEmpty(LocalBridgeContract.Inventory.Rent).orZero(),
+    details = getStringOrEmpty(LocalBridgeContract.Inventory.Details),
+    price = getStringOrEmpty(LocalBridgeContract.Inventory.Price).orZero(),
+    landingPrice = getStringOrEmpty(LocalBridgeContract.Inventory.LandingPrice).orZero(),
+    checkout = getStringOrEmpty(LocalBridgeContract.Inventory.Checkout).orZero(),
+    vendorName = getStringOrEmpty(LocalBridgeContract.Inventory.VendorName),
+    vendorPhone = getStringOrEmpty(LocalBridgeContract.Inventory.VendorPhone),
+    vendorEmail = getStringOrEmpty(LocalBridgeContract.Inventory.VendorEmail),
+    imageUri = imageUri,
+    mediaUris = mediaUris,
+    status = getStringOrEmpty(LocalBridgeContract.Inventory.Status).ifBlank { "complete" },
+    templatePrimaryTitle = getStringOrEmpty(LocalBridgeContract.Inventory.TemplatePrimaryTitle),
+    templatePrimaryDescription = getStringOrEmpty(LocalBridgeContract.Inventory.TemplatePrimaryDescription),
+    templateSecondaryTitle = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateSecondaryTitle),
+    templateSecondaryDescription = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateSecondaryDescription),
+    templateContact = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateContact),
+  )
+}
+
+private fun Cursor.toBridgeLiveCustomerSession(): LiveCustomerSession? {
+  val sessionId = getStringOrEmpty(LocalBridgeContract.LiveSessions.SessionId)
+  if (sessionId.isBlank()) return null
+
+  return LiveCustomerSession(
+    sessionId = sessionId,
+    customerId = getStringOrEmpty(LocalBridgeContract.LiveSessions.CustomerId),
+    customerName = getStringOrEmpty(LocalBridgeContract.LiveSessions.CustomerName).ifBlank { "Customer" },
+    customerPhone = getStringOrEmpty(LocalBridgeContract.LiveSessions.CustomerPhone),
+    isLoggedIn = getBooleanOrFalse(LocalBridgeContract.LiveSessions.IsLoggedIn),
+    sessionStartedAt = getOptionalString(LocalBridgeContract.LiveSessions.SessionStartedAt),
+    lastSeenAt = getOptionalString(LocalBridgeContract.LiveSessions.LastSeenAt),
+    cartUpdatedAt = getOptionalString(LocalBridgeContract.LiveSessions.CartUpdatedAt),
+    updatedAt = getOptionalString(LocalBridgeContract.LiveSessions.UpdatedAt).takeIf { !it.isNullOrBlank() }
+      ?: getOptionalString(LocalBridgeContract.LiveSessions.LastSeenAt).takeIf { !it.isNullOrBlank() }
+      ?: currentTimestamp(),
+    cartItems = parseLiveCartItemsJson(getOptionalString(LocalBridgeContract.LiveSessions.CartItemsJson)),
+  )
+}
+
 private fun DataSnapshot.toRealtimeAccessRequest(): AdminAccessRequest? {
   val requestId = child("requestId").getValue(String::class.java).orEmpty().ifBlank { key.orEmpty() }
   if (requestId.isBlank()) return null
@@ -400,6 +664,46 @@ private fun DataSnapshot.toRealtimeAccessRequest(): AdminAccessRequest? {
     createdAt = child("createdAt").getValue(String::class.java).orEmpty(),
     updatedAt = child("updatedAt").getValue(String::class.java),
     note = child("note").getValue(String::class.java),
+  )
+}
+
+private fun DataSnapshot.toLiveCustomerSession(): LiveCustomerSession? {
+  val sessionId = stringValue("sessionId").orEmpty().ifBlank { key.orEmpty() }
+  if (sessionId.isBlank()) return null
+
+  val cartNode = when {
+    child("cartItems").exists() -> child("cartItems")
+    child("cart").child("items").exists() -> child("cart").child("items")
+    child("cart").exists() -> child("cart")
+    else -> null
+  }
+  val cartItems = cartNode?.children?.mapNotNull { child -> child.toLiveCartPlant() }.orEmpty()
+  val updatedAt = stringValue("updatedAt", "lastSeenAt", "cartUpdatedAt", "sessionStartedAt") ?: currentTimestamp()
+
+  return LiveCustomerSession(
+    sessionId = sessionId,
+    customerId = stringValue("customerId", "userId").orEmpty(),
+    customerName = stringValue("customerName", "name").orEmpty().ifBlank { "Customer" },
+    customerPhone = stringValue("customerPhone", "phone").orEmpty(),
+    isLoggedIn = booleanValue("isLoggedIn", "loggedIn") ?: false,
+    sessionStartedAt = stringValue("sessionStartedAt", "loginAt", "loggedInAt"),
+    lastSeenAt = stringValue("lastSeenAt", "sessionUpdatedAt", "heartbeatAt"),
+    cartUpdatedAt = stringValue("cartUpdatedAt"),
+    updatedAt = updatedAt,
+    cartItems = cartItems,
+  )
+}
+
+private fun DataSnapshot.toLiveCartPlant(): LiveCartPlant? {
+  val itemId = stringValue("itemId", "plantId", "id").orEmpty().ifBlank { key.orEmpty() }
+  val plantName = stringValue("plantName", "name", "title", "productName").orEmpty()
+  if (itemId.isBlank() && plantName.isBlank()) return null
+
+  return LiveCartPlant(
+    itemId = itemId.ifBlank { plantName.lowercase(Locale.US).replace(" ", "-") },
+    plantName = plantName.ifBlank { "Plant" },
+    quantity = intValue("quantity", "count").coerceAtLeast(1),
+    imageUri = stringValue("imageUri", "image"),
   )
 }
 
@@ -507,10 +811,12 @@ private fun Any?.toCartProductItem(): CartProductItem? {
 
 private fun String?.toDashboardDestination(): DashboardDestination? {
   return when (this?.trim()?.lowercase(Locale.US)) {
+    "otc" -> DashboardDestination.OTC
     "plants" -> DashboardDestination.Plants
     "pots" -> DashboardDestination.Pots
     "supplies" -> DashboardDestination.Supplies
     "docs" -> DashboardDestination.Docs
+    "live" -> DashboardDestination.Live
     "art" -> DashboardDestination.Art
     else -> null
   }
@@ -526,6 +832,20 @@ private fun Cursor.getOptionalString(columnName: String): String? {
   return if (index >= 0 && !isNull(index)) getString(index) else null
 }
 
+private fun Cursor.getBooleanOrFalse(columnName: String): Boolean {
+  val index = getColumnIndex(columnName)
+  if (index < 0 || isNull(index)) return false
+  return when (getType(index)) {
+    Cursor.FIELD_TYPE_INTEGER -> getInt(index) != 0
+    Cursor.FIELD_TYPE_STRING -> {
+      val value = getString(index).orEmpty()
+      value == "1" || value.equals("true", ignoreCase = true) || value.equals("yes", ignoreCase = true)
+    }
+
+    else -> false
+  }
+}
+
 private fun String?.orZero(): String {
   return if (this.isNullOrBlank()) "0" else this
 }
@@ -534,8 +854,143 @@ private fun String.inventorySequence(): Long {
   return substringAfterLast('-').toLongOrNull() ?: 0L
 }
 
+private fun String?.timestampSortKey(): Long {
+  return parseBridgeTimestampMillis(this) ?: 0L
+}
+
 private fun currentTimestamp(): String {
-  return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+  return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.US).apply {
+    timeZone = TimeZone.getTimeZone("UTC")
+  }.format(Date())
+}
+
+private fun parseBridgeTimestampMillis(value: String?): Long? {
+  val raw = value?.trim().orEmpty()
+  if (raw.isBlank()) return null
+
+  raw.toLongOrNull()?.let { numeric ->
+    return if (numeric > 1000000000000L) numeric else numeric * 1000L
+  }
+
+  val patterns = listOf(
+    "yyyy-MM-dd'T'HH:mm:ss.SSSX" to null,
+    "yyyy-MM-dd'T'HH:mm:ssX" to null,
+    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd'T'HH:mm:ss'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd HH:mm:ss" to null,
+    "dd-MM-yyyy HH:mm:ss" to null,
+  )
+  patterns.forEach { (pattern, timeZone) ->
+    runCatching {
+      SimpleDateFormat(pattern, Locale.US).apply {
+        if (timeZone != null) {
+          this.timeZone = timeZone
+        }
+      }.parse(raw)?.time
+    }.getOrNull()?.let { return it }
+  }
+  return null
+}
+
+private fun List<LiveCartPlant>.toCartItemsJson(): String {
+  return JSONArray().apply {
+    forEach { item ->
+      put(
+        JSONObject().apply {
+          put("itemId", item.itemId)
+          put("plantName", item.plantName)
+          put("quantity", item.quantity)
+          put("imageUri", item.imageUri)
+        },
+      )
+    }
+  }.toString()
+}
+
+private fun List<String>.toStringListJson(): String {
+  return JSONArray().apply {
+    forEach { value ->
+      put(value)
+    }
+  }.toString()
+}
+
+private fun List<LiveCartPlant>.toCartPlantSummary(): String {
+  return joinToString(separator = ", ") { item ->
+    "${item.plantName} x${item.quantity.coerceAtLeast(1)}"
+  }
+}
+
+private fun parseLiveCartItemsJson(raw: String?): List<LiveCartPlant> {
+  if (raw.isNullOrBlank()) return emptyList()
+  return runCatching {
+    val items = JSONArray(raw)
+    buildList {
+      for (index in 0 until items.length()) {
+        val item = items.optJSONObject(index) ?: continue
+        val itemId = item.optString("itemId").ifBlank { item.optString("id") }
+        val plantName = item.optString("plantName").ifBlank { item.optString("name") }
+        if (itemId.isBlank() && plantName.isBlank()) continue
+        add(
+          LiveCartPlant(
+            itemId = itemId.ifBlank { plantName.lowercase(Locale.US).replace(" ", "-") },
+            plantName = plantName.ifBlank { "Plant" },
+            quantity = item.optInt("quantity", 1).coerceAtLeast(1),
+            imageUri = item.optString("imageUri").takeIf { it.isNotBlank() },
+          ),
+        )
+      }
+    }
+  }.getOrDefault(emptyList())
+}
+
+private fun parseStringListJson(raw: String?): List<String> {
+  if (raw.isNullOrBlank()) return emptyList()
+  return runCatching {
+    val items = JSONArray(raw)
+    buildList {
+      for (index in 0 until items.length()) {
+        items.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+      }
+    }
+  }.getOrDefault(emptyList())
+}
+
+private fun DataSnapshot.stringValue(vararg keys: String): String? {
+  keys.forEach { key ->
+    val snapshot = child(key)
+    if (!snapshot.exists()) return@forEach
+    snapshot.getValue(String::class.java)?.takeIf { it.isNotBlank() }?.let { return it }
+    snapshot.value?.toString()?.takeIf { it.isNotBlank() && it != "null" }?.let { return it }
+  }
+  return null
+}
+
+private fun DataSnapshot.booleanValue(vararg keys: String): Boolean? {
+  keys.forEach { key ->
+    val snapshot = child(key)
+    if (!snapshot.exists()) return@forEach
+    snapshot.getValue(Boolean::class.java)?.let { return it }
+    snapshot.getValue(Long::class.java)?.let { return it != 0L }
+    snapshot.value?.toString()?.let { raw ->
+      when {
+        raw.equals("true", ignoreCase = true) || raw == "1" || raw.equals("yes", ignoreCase = true) -> return true
+        raw.equals("false", ignoreCase = true) || raw == "0" || raw.equals("no", ignoreCase = true) -> return false
+      }
+    }
+  }
+  return null
+}
+
+private fun DataSnapshot.intValue(vararg keys: String): Int {
+  keys.forEach { key ->
+    val snapshot = child(key)
+    if (!snapshot.exists()) return@forEach
+    snapshot.getValue(Int::class.java)?.let { return it }
+    snapshot.getValue(Long::class.java)?.toInt()?.let { return it }
+    snapshot.value?.toString()?.toIntOrNull()?.let { return it }
+  }
+  return 0
 }
 
 private fun resolvePreviewImageBase64(
@@ -552,26 +1007,70 @@ private fun encodeImageUriToBase64(
 ): String? {
   return runCatching {
     val uri = Uri.parse(uriString)
-    contentResolver.openInputStream(uri)?.use { stream ->
-      val original = BitmapFactory.decodeStream(stream) ?: return null
+    decodeSampledBitmap(contentResolver, uri, maxDimensionPx = 640)?.let { original ->
       val scaled = scaleBitmapIfNeeded(original)
       ByteArrayOutputStream().use { output ->
-        scaled.compress(Bitmap.CompressFormat.JPEG, 78, output)
+        scaled.compress(Bitmap.CompressFormat.JPEG, 72, output)
+        if (scaled !== original) {
+          scaled.recycle()
+        }
+        original.recycle()
         Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
       }
     }
   }.getOrNull()
 }
 
+private fun decodeSampledBitmap(
+  contentResolver: ContentResolver,
+  uri: Uri,
+  maxDimensionPx: Int,
+): Bitmap? {
+  val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+  contentResolver.openInputStream(uri)?.use { stream ->
+    BufferedInputStream(stream).use { buffered ->
+      BitmapFactory.decodeStream(buffered, null, boundsOptions)
+    }
+  } ?: return null
+
+  val decodeOptions = BitmapFactory.Options().apply {
+    inSampleSize = calculateInSampleSize(
+      sourceWidth = boundsOptions.outWidth,
+      sourceHeight = boundsOptions.outHeight,
+      maxDimensionPx = maxDimensionPx,
+    )
+    inPreferredConfig = Bitmap.Config.ARGB_8888
+  }
+  return contentResolver.openInputStream(uri)?.use { stream ->
+    BufferedInputStream(stream).use { buffered ->
+      BitmapFactory.decodeStream(buffered, null, decodeOptions)
+    }
+  }
+}
+
 private fun scaleBitmapIfNeeded(bitmap: Bitmap): Bitmap {
   val maxEdge = maxOf(bitmap.width, bitmap.height)
-  if (maxEdge <= 960) return bitmap
+  if (maxEdge <= 360) return bitmap
 
-  val scale = 960f / maxEdge.toFloat()
+  val scale = 360f / maxEdge.toFloat()
   return Bitmap.createScaledBitmap(
     bitmap,
     (bitmap.width * scale).toInt().coerceAtLeast(1),
     (bitmap.height * scale).toInt().coerceAtLeast(1),
     true,
   )
+}
+
+private fun calculateInSampleSize(
+  sourceWidth: Int,
+  sourceHeight: Int,
+  maxDimensionPx: Int,
+): Int {
+  if (sourceWidth <= 0 || sourceHeight <= 0 || maxDimensionPx <= 0) return 1
+  val largestEdge = maxOf(sourceWidth, sourceHeight)
+  var sampleSize = 1
+  while (largestEdge / sampleSize > maxDimensionPx) {
+    sampleSize *= 2
+  }
+  return sampleSize.coerceAtLeast(1)
 }

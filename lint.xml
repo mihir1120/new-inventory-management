@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+  <issue id="AndroidGradlePluginVersion" severity="ignore" />
+  <issue id="GradleDependency" severity="ignore" />
+  <issue id="NewerVersionAvailable" severity="ignore" />
+  <issue id="UseKtx" severity="ignore" />
+  <issue id="IconLauncherShape" severity="ignore" />
+  <issue id="IconLocation" severity="ignore" />
+  <issue id="IconDuplicates" severity="ignore" />
+  <issue id="IconDuplicatesConfig" severity="ignore" />
+
+  <issue id="UnusedResources">
+    <ignore path="app/src/main/res/raw/ashokvatika_invoice_template.pdf" />
+    <ignore path="app/src/main/res/drawable-nodpi/brandstock_cutout.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/icon_closed_direct_otc.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/landing_logo.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/landing_reference.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/letterhead_wireframe.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/logo_ashokvatika.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/logo_brandstock_footer.png" />
+    <ignore path="app/src/main/res/drawable-nodpi/new_png_menu.jpeg" />
+    <ignore path="app/src/main/res/drawable-nodpi/sandwich_icon.png" />
+  </issue>
+</lint>

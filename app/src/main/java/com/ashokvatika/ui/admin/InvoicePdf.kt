@@ -1,5 +1,7 @@
 package com.ashokvatika.ui.admin
 import android.content.Context
+import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
@@ -28,6 +30,7 @@ private data class InvoiceLineItem(
 )
 
 internal fun buildInvoicePdf(
+  context: Context,
   deal: SavedDeal,
 ): ByteArray {
   val lineItems = deal.toInvoiceLineItems()
@@ -42,6 +45,7 @@ internal fun buildInvoicePdf(
   canvas.drawColor(Color.WHITE)
 
   drawInvoice(
+    context = context,
     canvas = canvas,
     deal = deal,
     issueDate = issueDate,
@@ -63,8 +67,9 @@ internal fun buildLetterheadPdf(
   bodyText: String,
 ): ByteArray {
   val document = PdfDocument()
-  val headerBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.letterhead_header)
-  val footerBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.letterhead_footer)
+  val resources = context.applicationContext.resources
+  val headerBitmap = PdfBitmapCache.letterheadHeader(resources)
+  val footerBitmap = PdfBitmapCache.letterheadFooter(resources)
   val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#2C2C2C")
     textSize = 14f
@@ -123,6 +128,7 @@ internal fun buildLetterheadPdf(
 }
 
 private fun drawInvoice(
+  context: Context,
   canvas: Canvas,
   deal: SavedDeal,
   issueDate: String,
@@ -130,41 +136,65 @@ private fun drawInvoice(
   lineItems: List<InvoiceLineItem>,
   totalAmount: Int,
 ) {
+  val pageLeft = 24f
+  val pageRight = InvoicePageWidth - 24f
+  val tableLeft = pageLeft
+  val tableRight = pageRight
+  val descriptionRight = 380f
+  val quantityRight = 438f
+  val unitPriceRight = 500f
   val orange = Color.parseColor("#F47C2C")
-  val green = Color.parseColor("#39D267")
-  val pink = Color.parseColor("#D889DE")
+  val green = Color.parseColor("#33C86B")
+  val pink = Color.parseColor("#C98CCB")
   val grey = Color.parseColor("#8A8A8A")
-  val lineGrey = Color.parseColor("#D9D9D9")
+  val lightGrey = Color.parseColor("#D8D8D8")
   val black = Color.parseColor("#2C2C2C")
   val blue = Color.parseColor("#38A9F5")
+  val logoBitmap = PdfBitmapCache.invoiceLogo(context.applicationContext.resources)
 
+  val rulePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = lightGrey
+    strokeWidth = 1f
+  }
   val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = orange
-    textSize = 34f
+    textSize = 30f
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
   }
-  val nurseryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+  val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = green
-    textSize = 21f
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-  }
-  val subHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = pink
-    textSize = 10f
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-  }
-  val contactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = grey
-    textSize = 9f
+    textSize = 18f
     textAlign = Paint.Align.RIGHT
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
   }
-  val sectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+  val subBrandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = pink
+    textSize = 8.8f
+    textAlign = Paint.Align.RIGHT
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+  }
+  val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = grey
+    textSize = 8.8f
+    textAlign = Paint.Align.RIGHT
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+  }
+  val invoiceTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = blue
+    textSize = 26f
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+  }
+  val invoiceIdPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = blue
     textSize = 24f
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
   }
-  val metaLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+  val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = black
+    textSize = 10.8f
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+  }
+  val tableHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = grey
     textSize = 11f
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -179,82 +209,108 @@ private fun drawInvoice(
     textSize = 11f
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
   }
-  val totalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+  val amountPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = black
+    textSize = 11f
+    textAlign = Paint.Align.RIGHT
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+  }
+  val centeredAmountPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = black
+    textSize = 11f
+    textAlign = Paint.Align.CENTER
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+  }
+  val totalLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = grey
     textSize = 16f
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
   }
   val totalValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = grey
-    textSize = 18f
+    textSize = 16f
+    textAlign = Paint.Align.RIGHT
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
   }
-  val rulePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = lineGrey
-    strokeWidth = 1f
+  if (logoBitmap != null) {
+    canvas.drawBitmap(logoBitmap, null, RectF(18f, 44f, 188f, 106f), null)
+  } else {
+    canvas.drawText("Ashokvatika", 18f, 92f, logoPaint)
   }
 
-  canvas.drawText("Ashokvatika", 28f, 92f, logoPaint)
-  canvas.drawText("Ashokvatika Plants Nursery", 332f, 36f, nurseryPaint)
-  canvas.drawText("A SELECTION OF EXOTIC URBAN PLANTS & SUPPLIES", 565f, 54f, subHeaderPaint)
-  canvas.drawText("Vallabhbhai Patel Road / Mahakali", 565f, 74f, contactPaint)
-  canvas.drawText("Andheri - East / Mumbai", 565f, 92f, contactPaint)
-  canvas.drawText("+91 78085 80855 / +91 981981 7780", 565f, 110f, contactPaint)
-  canvas.drawText("ashokvatikanursery@gmail.com", 565f, 126f, contactPaint)
+  canvas.drawText("Ashokvatika Plants Nursery", pageRight, 48f, brandPaint)
+  canvas.drawText("A SELECTION OF EXOTIC URBAN PLANTS & SUPPLIES", pageRight, 67f, subBrandPaint)
+  canvas.drawText("Vallabhbhai Patel Road / Mahakali", pageRight, 87f, headerPaint)
+  canvas.drawText("Andheri - East / Mumbai", pageRight, 106f, headerPaint)
+  canvas.drawText("+91 78085 80855 / +91 981981 7780", pageRight, 125f, headerPaint)
+  canvas.drawText("ashokvatianursery@gmail.com", pageRight, 144f, headerPaint)
 
-  canvas.drawLine(24f, 146f, 568f, 146f, rulePaint)
+  canvas.drawLine(pageLeft, 170f, pageRight, 170f, rulePaint)
 
-  canvas.drawText("INVOICE", 28f, 190f, sectionPaint)
-  canvas.drawText("#  AVN", 28f, 238f, sectionPaint)
+  canvas.drawText("INVOICE", pageLeft, 222f, invoiceTitlePaint)
+  canvas.drawText("#", pageLeft, 308f, invoiceIdPaint)
+  canvas.drawText("AV", 58f, 308f, invoiceIdPaint)
+  canvas.drawText(invoiceNumber, 126f, 306f, bodyPaint)
 
-  canvas.drawText("CLIENT /", 176f, 180f, metaLabelPaint)
-  canvas.drawText("ADDRESS /", 176f, 205f, metaLabelPaint)
-  canvas.drawText("DATE /", 176f, 230f, metaLabelPaint)
-  canvas.drawText("POS /", 176f, 255f, metaLabelPaint)
+  val labelX = 232f
+  val valueX = 292f
+  canvas.drawText("CLIENT /", labelX, 212f, labelPaint)
+  canvas.drawText("ADDRESS /", labelX, 246f, labelPaint)
+  canvas.drawText("DATE /", labelX, 280f, labelPaint)
+  canvas.drawText("POS /", labelX, 314f, labelPaint)
+  canvas.drawText(deal.clientName.ifBlank { "Walk-in customer" }, valueX, 212f, bodyPaint)
+  canvas.drawText("-", valueX, 246f, bodyPaint)
+  canvas.drawText(issueDate, valueX, 280f, bodyPaint)
+  canvas.drawText(deal.transactionCode.ifBlank { "-" }, valueX, 314f, bodyPaint)
 
-  canvas.drawText(deal.clientName.ifBlank { "Walk-in customer" }, 264f, 180f, bodyPaint)
-  canvas.drawText("-", 264f, 205f, bodyPaint)
-  canvas.drawText(invoiceNumber, 92f, 238f, bodyPaint)
-  canvas.drawText(issueDate, 264f, 230f, bodyPaint)
-  canvas.drawText(deal.transactionCode.ifBlank { "-" }, 264f, 255f, bodyPaint)
+  val tableTop = 360f
+  val tableHeaderBottom = 404f
+  var y = tableHeaderBottom + 30f
+  val rowHeights = lineItems.map { item ->
+    val wrappedLines = wrapText(item.description, bodyPaint, descriptionRight - tableLeft - 18f)
+    wrappedLines to max(34f, wrappedLines.size * 18f)
+  }
+  val rowsHeight = rowHeights.sumOf { it.second.toInt() }.toFloat()
+  val tableBottom = max(tableHeaderBottom + 140f, tableHeaderBottom + rowsHeight + 24f)
 
-  val tableTop = 300f
-  val descX = 28f
-  val qtyX = 378f
-  val rateX = 442f
-  val totalX = 520f
+  canvas.drawLine(tableLeft, tableTop, tableRight, tableTop, rulePaint)
+  canvas.drawLine(tableLeft, tableHeaderBottom, tableRight, tableHeaderBottom, rulePaint)
+  canvas.drawLine(tableLeft, tableBottom, tableRight, tableBottom, rulePaint)
+  canvas.drawLine(tableLeft, tableTop, tableLeft, tableBottom, rulePaint)
+  canvas.drawLine(descriptionRight, tableTop, descriptionRight, tableBottom, rulePaint)
+  canvas.drawLine(quantityRight, tableTop, quantityRight, tableBottom, rulePaint)
+  canvas.drawLine(unitPriceRight, tableTop, unitPriceRight, tableBottom, rulePaint)
+  canvas.drawLine(tableRight, tableTop, tableRight, tableBottom, rulePaint)
 
-  canvas.drawText("DESCRIPTION", descX, tableTop, metaLabelPaint)
-  canvas.drawText("QNT", qtyX, tableTop, metaLabelPaint)
-  canvas.drawText("@", rateX, tableTop, metaLabelPaint)
-  canvas.drawText("TOTAL", totalX, tableTop, metaLabelPaint)
+  canvas.drawText("DESCRIPTION", tableLeft + 8f, 388f, tableHeaderPaint)
+  canvas.drawText("QNT", 392f, 388f, tableHeaderPaint)
+  canvas.drawText("@", 466f, 388f, tableHeaderPaint)
+  canvas.drawText("TOTAL", 524f, 388f, tableHeaderPaint)
 
-  var y = tableTop + 30f
-  lineItems.forEach { item ->
-    val wrappedLines = wrapText(item.description, bodyPaint, 300f)
-    wrappedLines.forEachIndexed { index, line ->
-      canvas.drawText(line, descX, y + index * 14f, bodyPaint)
+  rowHeights.forEachIndexed { index, (wrappedLines, rowHeight) ->
+    wrappedLines.forEachIndexed { lineIndex, line ->
+      canvas.drawText(line, tableLeft + 8f, y + lineIndex * 14f, bodyPaint)
     }
-    canvas.drawText(item.quantity.toString(), qtyX, y, bodyPaint)
-    canvas.drawText(formatInvoiceAmount(item.unitPrice), rateX, y, bodyPaint)
-    canvas.drawText(formatInvoiceAmount(item.total), totalX, y, bodyPaint)
-    y += max(28f, wrappedLines.size * 16f)
+    canvas.drawText(lineItems[index].quantity.toString(), 408f, y, centeredAmountPaint)
+    canvas.drawText(formatInvoiceAmount(lineItems[index].unitPrice), 474f, y, amountPaint)
+    canvas.drawText(formatInvoiceAmount(lineItems[index].total), 548f, y, amountPaint)
+    y += rowHeight
+    canvas.drawLine(tableLeft, y - 12f, tableRight, y - 12f, rulePaint)
   }
 
-  val grandTotalY = max(y + 18f, 510f)
-  canvas.drawText("GRAND TOTAL : Rs.", 360f, grandTotalY, totalPaint)
-  canvas.drawText(formatInvoiceAmount(totalAmount), 500f, grandTotalY, totalValuePaint)
+  val totalY = tableBottom + 50f
+  canvas.drawText("GRAND TOTAL : ₹", 356f, totalY, totalLabelPaint)
+  canvas.drawText(formatInvoiceAmount(totalAmount), 548f, totalY, totalValuePaint)
 
-  val wordsY = grandTotalY + 46f
-  canvas.drawText("IN", 28f, wordsY, bodyBoldPaint)
-  canvas.drawText("WORDS/", 28f, wordsY + 20f, bodyBoldPaint)
-  canvas.drawText(numberToWords(totalAmount), 92f, wordsY + 4f, bodyPaint)
+  val wordsY = totalY + 68f
+  canvas.drawText("IN WORDS/", pageLeft, wordsY, bodyBoldPaint)
+  canvas.drawText(numberToWords(totalAmount), 170f, wordsY, bodyPaint)
 
-  val footerLineY = wordsY + 42f
-  canvas.drawLine(24f, footerLineY, 568f, footerLineY, rulePaint)
-  canvas.drawText("We at Ashokvatika, sincerely appreciate your business.", 28f, footerLineY + 44f, bodyPaint)
-  canvas.drawText("THANKS & REGARDS,", 28f, footerLineY + 68f, bodyBoldPaint)
-  canvas.drawText("VISHAKHA SHINDE,", 28f, footerLineY + 116f, bodyPaint)
+  val footerLineY = wordsY + 34f
+  canvas.drawLine(pageLeft, footerLineY, pageRight, footerLineY, rulePaint)
+  canvas.drawText("We at Ashokvatika, sincerely appreciate your business.", pageLeft, footerLineY + 44f, bodyPaint)
+  canvas.drawText("THANKS & REGARDS,", pageLeft, footerLineY + 68f, bodyPaint)
+  canvas.drawText("VISHAKHA SHINDE,", pageLeft, footerLineY + 126f, bodyPaint)
 }
 
 private fun SavedDeal.toInvoiceLineItems(): List<InvoiceLineItem> {
@@ -397,5 +453,40 @@ private fun numberToWords(value: Int): String {
   return parts.joinToString(" ").replaceFirstChar {
     if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString()
   } + " only"
+}
+
+private object PdfBitmapCache {
+  @Volatile
+  private var cachedHeader: Bitmap? = null
+
+  @Volatile
+  private var cachedFooter: Bitmap? = null
+
+  @Volatile
+  private var cachedLogo: Bitmap? = null
+
+  fun letterheadHeader(resources: Resources): Bitmap? {
+    return cachedHeader ?: synchronized(this) {
+      cachedHeader ?: BitmapFactory.decodeResource(resources, R.drawable.letterhead_header).also {
+        cachedHeader = it
+      }
+    }
+  }
+
+  fun letterheadFooter(resources: Resources): Bitmap? {
+    return cachedFooter ?: synchronized(this) {
+      cachedFooter ?: BitmapFactory.decodeResource(resources, R.drawable.letterhead_footer).also {
+        cachedFooter = it
+      }
+    }
+  }
+
+  fun invoiceLogo(resources: Resources): Bitmap? {
+    return cachedLogo ?: synchronized(this) {
+      cachedLogo ?: BitmapFactory.decodeResource(resources, R.drawable.av_logo_exact).also {
+        cachedLogo = it
+      }
+    }
+  }
 }
 

@@ -24,6 +24,7 @@ object LocalBridgeContract {
     const val Status = "status"
     const val Checkout = "checkout"
     const val ImageUri = "imageUri"
+    const val MediaUrisJson = "mediaUrisJson"
     const val ImageBase64 = "imageBase64"
     const val QrCodeValue = "qrCodeValue"
     const val TemplatePrimaryTitle = "templatePrimaryTitle"
@@ -53,5 +54,25 @@ object LocalBridgeContract {
     val ContentUri: Uri = BaseUri.buildUpon().appendPath(Table).build()
 
     fun itemUri(requestId: String): Uri = ContentUri.buildUpon().appendPath(requestId).build()
+  }
+
+  object LiveSessions {
+    const val Table = "customer_live_sessions"
+    const val SessionId = "sessionId"
+    const val CustomerId = "customerId"
+    const val CustomerName = "customerName"
+    const val CustomerPhone = "customerPhone"
+    const val IsLoggedIn = "isLoggedIn"
+    const val SessionStartedAt = "sessionStartedAt"
+    const val LastSeenAt = "lastSeenAt"
+    const val CartUpdatedAt = "cartUpdatedAt"
+    const val CartItemsJson = "cartItemsJson"
+    const val CartItemCount = "cartItemCount"
+    const val CartPlantSummary = "cartPlantSummary"
+    const val UpdatedAt = "updatedAt"
+
+    val ContentUri: Uri = BaseUri.buildUpon().appendPath(Table).build()
+
+    fun itemUri(sessionId: String): Uri = ContentUri.buildUpon().appendPath(sessionId).build()
   }
 }
