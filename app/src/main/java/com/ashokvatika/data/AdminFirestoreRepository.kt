@@ -12,11 +12,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.Base64
-import com.ashokvatika.ui.admin.CartProductItem
-import com.ashokvatika.ui.admin.DashboardDestination
-import com.ashokvatika.ui.admin.InventoryItem
-import com.ashokvatika.ui.admin.OpenCartRow
-import com.ashokvatika.ui.admin.SavedDeal
+import com.ashokvatika.domain.model.CartProductItem
+import com.ashokvatika.domain.model.DashboardDestination
+import com.ashokvatika.domain.model.InventoryItem
+import com.ashokvatika.domain.model.OpenCartRow
+import com.ashokvatika.domain.model.SavedDeal
+import com.ashokvatika.domain.model.AdminAccessRequest
+import com.ashokvatika.domain.model.LiveCartPlant
+import com.ashokvatika.domain.model.LiveCustomerSession
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
@@ -40,37 +43,6 @@ private const val SavedDealsCollection = "saved_deals"
 private const val LiveSessionsCollection = "customer_live_sessions"
 private const val ProductQrPrefix = "ashokvatika://product/"
 private const val BridgeLogTag = "LocalBridgeSync"
-
-data class AdminAccessRequest(
-  val requestId: String,
-  val customerId: String,
-  val customerName: String,
-  val customerPhone: String,
-  val status: String,
-  val createdAt: String,
-  val updatedAt: String? = null,
-  val note: String? = null,
-)
-
-data class LiveCartPlant(
-  val itemId: String,
-  val plantName: String,
-  val quantity: Int,
-  val imageUri: String? = null,
-)
-
-data class LiveCustomerSession(
-  val sessionId: String,
-  val customerId: String,
-  val customerName: String,
-  val customerPhone: String,
-  val isLoggedIn: Boolean,
-  val sessionStartedAt: String? = null,
-  val lastSeenAt: String? = null,
-  val cartUpdatedAt: String? = null,
-  val updatedAt: String,
-  val cartItems: List<LiveCartPlant> = emptyList(),
-)
 
 class LocalBridgeObservation(
   private val dispose: () -> Unit,
@@ -145,6 +117,7 @@ class AdminFirestoreRepository(
       override fun onDataChange(snapshot: DataSnapshot) {
         val sessions = snapshot.children
           .mapNotNull { child -> child.toLiveCustomerSession() }
+          .filter { session -> session.isLoggedIn }
           .sortedWith(
             compareByDescending<LiveCustomerSession> { it.isLoggedIn }
               .thenByDescending { it.updatedAt.timestampSortKey() }
@@ -393,6 +366,21 @@ class AdminFirestoreRepository(
     val note = if (approved) "Approved by admin" else "Denied by admin"
 
     runCatching {
+      context.contentResolver.update(
+        LocalBridgeContract.AccessRequests.itemUri(requestId),
+        ContentValues().apply {
+          put(LocalBridgeContract.AccessRequests.Status, status)
+          put(LocalBridgeContract.AccessRequests.UpdatedAt, timestamp)
+          put(LocalBridgeContract.AccessRequests.Note, note)
+        },
+        null,
+        null,
+      )
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Local access request bridge update failed for $requestId", error)
+    }
+
+    runCatching {
       realtimeDatabase.child(requestId).updateChildren(
         mapOf(
           "status" to status,
@@ -404,6 +392,36 @@ class AdminFirestoreRepository(
       Log.w(BridgeLogTag, "Realtime access request update failed for $requestId", error)
       throw error
     }
+  }
+
+  suspend fun addProductToLiveCustomerCart(
+    session: LiveCustomerSession,
+    item: InventoryItem,
+  ) {
+    if (session.sessionId.isBlank() || item.id.isBlank()) return
+
+    val timestamp = currentTimestamp()
+    val cartItemRef = liveSessionsDatabase
+      .child(session.sessionId)
+      .child("cartItems")
+      .child(item.id)
+    val existingQuantity = runCatching {
+      cartItemRef.get().await().intValue("quantity", "count")
+    }.getOrDefault(0)
+    val imageUri = item.mediaUris.firstOrNull() ?: item.imageUri
+
+    liveSessionsDatabase.child(session.sessionId).updateChildren(
+      mapOf(
+        "cartItems/${item.id}/itemId" to item.id,
+        "cartItems/${item.id}/plantId" to item.id,
+        "cartItems/${item.id}/plantName" to item.name,
+        "cartItems/${item.id}/name" to item.name,
+        "cartItems/${item.id}/quantity" to (existingQuantity + 1).coerceAtLeast(1),
+        "cartItems/${item.id}/imageUri" to imageUri,
+        "cartUpdatedAt" to timestamp,
+        "updatedAt" to timestamp,
+      ),
+    ).await()
   }
 
   private fun replaceInventoryBridgeSnapshot(items: List<InventoryItem>) {
@@ -507,6 +525,7 @@ class AdminFirestoreRepository(
         }
       }
     }.orEmpty()
+      .filter { session -> session.isLoggedIn }
       .sortedWith(
         compareByDescending<LiveCustomerSession> { it.isLoggedIn }
           .thenByDescending { it.updatedAt.timestampSortKey() }

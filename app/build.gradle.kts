@@ -15,6 +15,7 @@ android {
     versionCode = 1
     versionName = "1.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    manifestPlaceholders["usesCleartextTraffic"] = "false"
   }
 
   buildTypes {
@@ -24,6 +25,7 @@ android {
       buildConfigField("boolean", "ENABLE_SCREENSHOT_PROTECTION", "false")
       buildConfigField("boolean", "ENABLE_EXPERIMENTS", "true")
       buildConfigField("String", "RELEASE_CHANNEL", "\"debug\"")
+      manifestPlaceholders["usesCleartextTraffic"] = "true"
     }
 
     release {
@@ -34,6 +36,7 @@ android {
       buildConfigField("boolean", "ENABLE_SCREENSHOT_PROTECTION", "true")
       buildConfigField("boolean", "ENABLE_EXPERIMENTS", "false")
       buildConfigField("String", "RELEASE_CHANNEL", "\"production\"")
+      manifestPlaceholders["usesCleartextTraffic"] = "false"
       proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro",
@@ -70,6 +73,7 @@ android {
 dependencies {
   implementation("androidx.core:core-ktx:1.18.0")
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
+  implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
   implementation("androidx.activity:activity-compose:1.13.0")
   implementation("androidx.constraintlayout:constraintlayout:2.2.1")
 

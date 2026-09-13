@@ -31,10 +31,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ashokvatika.data.AdminAccessRequest
+import com.ashokvatika.domain.model.AdminAccessRequest
 import com.ashokvatika.data.AdminAuthStore
 import com.ashokvatika.data.AdminFirestoreRepository
-import com.ashokvatika.data.LiveCustomerSession
+import com.ashokvatika.domain.model.LiveCartPlant
+import com.ashokvatika.domain.model.LiveCustomerSession
+import com.ashokvatika.domain.model.CartProductItem
+import com.ashokvatika.domain.model.DashboardDestination
+import com.ashokvatika.domain.model.InventoryItem
+import com.ashokvatika.domain.model.OpenCartRow
+import com.ashokvatika.domain.model.SavedDeal
+import com.ashokvatika.domain.usecase.InvoiceNumberStart
+import com.ashokvatika.domain.usecase.generateTransactionCode
+import com.ashokvatika.domain.usecase.mergeCartItems
+import com.ashokvatika.domain.usecase.openCartRowId
+import com.ashokvatika.domain.usecase.toCartProductItem
+import com.ashokvatika.domain.usecase.upsert
 import com.ashokvatika.notifications.AdminApprovalNotifier
 import com.ashokvatika.ui.admin.AdminHomeScreen
 import com.ashokvatika.ui.admin.ArtHomeScreen
@@ -46,24 +58,17 @@ import com.ashokvatika.ui.admin.ArtProPlusScreen
 import com.ashokvatika.ui.admin.ArtProfileScreen
 import com.ashokvatika.ui.admin.AddressInfoScreen
 import com.ashokvatika.ui.admin.CategoryScreen
-import com.ashokvatika.ui.admin.CartProductItem
-import com.ashokvatika.ui.admin.DashboardDestination
 import com.ashokvatika.ui.admin.DocsHomeScreen
-import com.ashokvatika.ui.admin.InventoryItem
 import com.ashokvatika.ui.admin.InventoryListScreen
+import com.ashokvatika.ui.admin.InvoiceCreateScreen
 import com.ashokvatika.ui.admin.LetterheadScreen
 import com.ashokvatika.ui.admin.LiveHomeScreen
 import com.ashokvatika.ui.admin.LiveInventoryCatalog
-import com.ashokvatika.ui.admin.OpenCartRow
 import com.ashokvatika.ui.admin.OpenCartScreen
 import com.ashokvatika.ui.admin.OtcScreen
-import com.ashokvatika.ui.admin.SavedDeal
 import com.ashokvatika.ui.admin.SavedDealsScreen
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
-import java.security.SecureRandom
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 private enum class Route {
@@ -79,6 +84,7 @@ private enum class Route {
   ArtProPlus,
   ArtProfile,
   AddressInfo,
+  InvoiceCreate,
   Letterhead,
   Otc,
   OpenCart,
@@ -108,22 +114,97 @@ fun AppRoot() {
     mutableStateMapOf<DashboardDestination, List<InventoryItem>>()
   }
   val pendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
+  val bridgePendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
+  val remotePendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
   var adminSyncMessage by remember { mutableStateOf<String?>(null) }
   val liveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
+  val bridgeLiveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
+  val remoteLiveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
   var liveSyncMessage by remember { mutableStateOf<String?>(null) }
   val openCartRows = remember { mutableStateListOf<OpenCartRow>() }
   val savedDeals = remember { mutableStateListOf<SavedDeal>() }
   var cartRowCounter by remember { mutableIntStateOf(1) }
-  var savedDealCounter by remember { mutableIntStateOf(1) }
+  var savedDealCounter by remember { mutableIntStateOf(InvoiceNumberStart) }
   var clientName by remember { mutableStateOf("") }
   var clientPhone by remember { mutableStateOf("") }
   var clientId by remember { mutableStateOf("") }
-  var transactionCode by remember { mutableStateOf(generateTransactionCode()) }
+  var transactionCode by remember { mutableStateOf(generateTransactionCode(InvoiceNumberStart)) }
+  var syncedCartSessionId by remember { mutableStateOf<String?>(null) }
   var lastNotifiedRequestId by rememberSaveable { mutableStateOf<String?>(null) }
   val hasFirebaseSession = auth.currentUser != null
-  val cartItemCount = openCartRows.size
   LiveInventoryCatalog.inventoryByDestination = inventory.mapValues { entry -> entry.value.toList() }
   val currentInventorySnapshot = inventory.values.flatten()
+  val activeLiveSessionsForCart = liveCustomerSessions.filter { session -> session.isLoggedIn }
+  val cartItemCount = openCartRows.size + activeLiveSessionsForCart.count { session ->
+    openCartRows.none { row -> row.id == session.openCartRowId() }
+  }
+
+  fun refreshPendingAccessRequests() {
+    val merged = (bridgePendingAccessRequests + remotePendingAccessRequests)
+      .associateBy { request -> request.requestId }
+      .values
+      .sortedBy { request -> request.createdAt }
+    pendingAccessRequests.clear()
+    pendingAccessRequests.addAll(merged)
+  }
+
+  fun refreshLiveCustomerSessions() {
+    val merged = (bridgeLiveCustomerSessions + remoteLiveCustomerSessions)
+      .associateBy { session -> session.sessionId }
+      .values
+      .sortedWith(
+        compareByDescending<LiveCustomerSession> { session -> session.isLoggedIn }
+          .thenByDescending { session -> session.updatedAt }
+          .thenBy { session -> session.customerName.lowercase(Locale.US) },
+      )
+    liveCustomerSessions.clear()
+    liveCustomerSessions.addAll(merged)
+  }
+
+  fun syncLiveSessionsToOpenCart() {
+    val activeSession = liveCustomerSessions
+      .filter { session -> session.isLoggedIn }
+      .maxByOrNull { session -> session.updatedAt }
+
+    val liveRowIds = liveCustomerSessions.map { session -> session.openCartRowId() }.toSet()
+    val activeRowId = activeSession?.openCartRowId()
+    openCartRows.removeAll { row -> row.id in liveRowIds && row.id != activeRowId }
+
+    if (activeSession == null) {
+      if (syncedCartSessionId != null && openCartRows.none { row -> row.id == syncedCartSessionId?.let { "live-session-$it" } }) {
+        syncedCartSessionId = null
+      }
+      return
+    }
+
+    if (syncedCartSessionId != activeSession.sessionId) {
+      clientName = activeSession.customerName.ifBlank { clientName }
+      clientPhone = activeSession.customerPhone.filter(Char::isDigit).ifBlank { clientPhone }
+      clientId = activeSession.customerId.ifBlank { clientId }
+      syncedCartSessionId = activeSession.sessionId
+    } else {
+      if (clientName.isBlank()) clientName = activeSession.customerName
+      if (clientPhone.isBlank()) clientPhone = activeSession.customerPhone.filter(Char::isDigit)
+      if (clientId.isBlank()) clientId = activeSession.customerId
+    }
+
+    val syncedItems = activeSession.cartItems.map { cartItem ->
+      cartItem.toCartProductItem(currentInventorySnapshot)
+    }
+    val syncedRow = OpenCartRow(
+      id = activeSession.openCartRowId(),
+      title = activeSession.customerName.ifBlank { "Live customer" },
+      items = syncedItems,
+    )
+    val existingIndex = openCartRows.indexOfFirst { row -> row.id == syncedRow.id }
+    if (existingIndex >= 0 && syncedItems.isEmpty()) {
+      openCartRows.removeAt(existingIndex)
+    } else if (existingIndex >= 0) {
+      openCartRows[existingIndex] = syncedRow.copy(customAmount = openCartRows[existingIndex].customAmount)
+    } else if (syncedItems.isNotEmpty()) {
+      openCartRows.add(0, syncedRow)
+    }
+  }
 
   LaunchedEffect(isProvisioned) {
     if (!isProvisioned && hasPersistedSession) {
@@ -150,12 +231,16 @@ fun AppRoot() {
     lastNotifiedRequestId = incomingRequest.requestId
   }
 
-  LaunchedEffect(currentInventorySnapshot) {
+LaunchedEffect(currentInventorySnapshot) {
     runCatching {
       firestoreRepository.publishInventorySnapshotLocally(currentInventorySnapshot)
     }.onFailure { error ->
       adminSyncMessage = "Inventory bridge sync error: ${error.message ?: "Unable to publish local inventory."}"
     }
+  }
+
+  LaunchedEffect(liveCustomerSessions.toList(), currentInventorySnapshot) {
+    syncLiveSessionsToOpenCart()
   }
 
   if (route != Route.Landing) {
@@ -172,6 +257,16 @@ fun AppRoot() {
           adminSyncMessage = "Inventory load error: ${error.message ?: "Unable to read saved inventory."}"
         },
       )
+      val requestsBridgeRegistration = firestoreRepository.observeBridgePendingAccessRequests(
+        onUpdate = { requests ->
+          bridgePendingAccessRequests.clear()
+          bridgePendingAccessRequests.addAll(requests)
+          refreshPendingAccessRequests()
+        },
+        onError = { error ->
+          adminSyncMessage = "Approval bridge error: ${error.message ?: "Unable to read local customer requests."}"
+        },
+      )
       val inventoryRegistration = firestoreRepository.observeInventory(
         onUpdate = {
           adminSyncMessage = null
@@ -183,11 +278,12 @@ fun AppRoot() {
       val requestsRegistration = firestoreRepository.observePendingAccessRequests(
         onUpdate = { requests ->
           adminSyncMessage = null
-          pendingAccessRequests.clear()
-          pendingAccessRequests.addAll(requests)
+          remotePendingAccessRequests.clear()
+          remotePendingAccessRequests.addAll(requests)
+          refreshPendingAccessRequests()
         },
         onError = { error ->
-          adminSyncMessage = "Approval sync error: ${error.message ?: "Unable to connect to Firebase."}"
+          adminSyncMessage = error.message?.takeUnless { message -> message.contains("Permission denied", ignoreCase = true) }?.let { message -> "Approval sync error: $message" }
         },
       )
       val savedDealsRegistration = firestoreRepository.observeSavedDeals(
@@ -195,6 +291,13 @@ fun AppRoot() {
           adminSyncMessage = null
           savedDeals.clear()
           savedDeals.addAll(deals)
+          val nextCounter = nextInvoiceCounter(deals)
+          if (nextCounter > savedDealCounter) {
+            savedDealCounter = nextCounter
+            if (openCartRows.isEmpty()) {
+              transactionCode = generateTransactionCode(nextCounter)
+            }
+          }
         },
         onError = { error ->
           adminSyncMessage = "OTC sync error: ${error.message ?: "Unable to connect to Firebase."}"
@@ -203,8 +306,9 @@ fun AppRoot() {
       val liveBridgeRegistration = firestoreRepository.observeBridgeLiveCustomerSessions(
         onUpdate = { sessions ->
           liveSyncMessage = null
-          liveCustomerSessions.clear()
-          liveCustomerSessions.addAll(sessions)
+          bridgeLiveCustomerSessions.clear()
+          bridgeLiveCustomerSessions.addAll(sessions)
+          refreshLiveCustomerSessions()
         },
         onError = { error ->
           liveSyncMessage = "Live sync error: ${error.message ?: "Unable to load customer sessions."}"
@@ -213,16 +317,18 @@ fun AppRoot() {
       val liveRemoteRegistration = firestoreRepository.observeLiveCustomerSessions(
         onUpdate = { sessions ->
           liveSyncMessage = null
-          liveCustomerSessions.clear()
-          liveCustomerSessions.addAll(sessions)
+          remoteLiveCustomerSessions.clear()
+          remoteLiveCustomerSessions.addAll(sessions)
+          refreshLiveCustomerSessions()
         },
         onError = { error ->
-          liveSyncMessage = "Live sync error: ${error.message ?: "Unable to connect to Firebase."}"
+          liveSyncMessage = error.message?.takeUnless { message -> message.contains("Permission denied", ignoreCase = true) }?.let { message -> "Live sync error: $message" }
         },
       )
 
       onDispose {
         inventoryBridgeRegistration.remove()
+        requestsBridgeRegistration.remove()
         inventoryRegistration.remove()
         requestsRegistration.remove()
         savedDealsRegistration.remove()
@@ -275,12 +381,25 @@ fun AppRoot() {
       Route.Live -> LiveHomeScreen(
         onBack = { route = Route.AdminHome },
         liveSessions = liveCustomerSessions,
+        inventoryItems = currentInventorySnapshot,
         syncMessage = liveSyncMessage,
+        onAddProductToCart = { session, item ->
+          scope.launch {
+            runCatching {
+              firestoreRepository.addProductToLiveCustomerCart(session, item)
+            }.onSuccess {
+              liveSyncMessage = "${item.name} added to ${session.customerName.ifBlank { "customer" }} cart."
+            }.onFailure { error ->
+              liveSyncMessage = "Cart update error: ${error.message ?: "Unable to add product."}"
+            }
+          }
+        },
       )
 
       Route.DocsHome -> DocsHomeScreen(
         onBack = { route = Route.AdminHome },
         onOpenAddress = { route = Route.AddressInfo },
+        onOpenInvoice = { route = Route.InvoiceCreate },
         onOpenLetterhead = { route = Route.Letterhead },
         onOpenArt = {
           artBackRoute = Route.DocsHome
@@ -289,6 +408,10 @@ fun AppRoot() {
       )
 
       Route.AddressInfo -> AddressInfoScreen(
+        onBack = { route = Route.DocsHome },
+      )
+
+      Route.InvoiceCreate -> InvoiceCreateScreen(
         onBack = { route = Route.DocsHome },
       )
 
@@ -334,7 +457,7 @@ fun AppRoot() {
         onBack = { route = Route.AdminHome },
         cartCount = cartItemCount,
         onOpenCart = {
-          if (openCartRows.isNotEmpty()) {
+          if (openCartRows.isNotEmpty() || activeLiveSessionsForCart.isNotEmpty()) {
             route = Route.OpenCart
           }
         },
@@ -354,6 +477,9 @@ fun AppRoot() {
 
       Route.OpenCart -> OpenCartScreen(
         rows = openCartRows,
+        liveSessions = liveCustomerSessions,
+        inventoryItems = currentInventorySnapshot,
+        liveSyncMessage = liveSyncMessage,
         clientName = clientName,
         clientPhone = clientPhone,
         clientId = clientId,
@@ -426,7 +552,18 @@ fun AppRoot() {
           clientName = ""
           clientPhone = ""
           clientId = ""
-          transactionCode = generateTransactionCode()
+          transactionCode = generateTransactionCode(savedDealCounter)
+        },
+        onAddProductToLiveCart = { session, item ->
+          scope.launch {
+            runCatching {
+              firestoreRepository.addProductToLiveCustomerCart(session, item)
+            }.onSuccess {
+              liveSyncMessage = "${item.name} added to ${session.customerName.ifBlank { "customer" }} cart."
+            }.onFailure { error ->
+              liveSyncMessage = "Cart update error: ${error.message ?: "Unable to add product."}"
+            }
+          }
         },
         onSaveDeal = { deal ->
           if (deal.rows.isNotEmpty()) {
@@ -447,7 +584,7 @@ fun AppRoot() {
             clientName = ""
             clientPhone = ""
             clientId = ""
-            transactionCode = generateTransactionCode()
+            transactionCode = generateTransactionCode(savedDealCounter)
           }
         },
       )
@@ -460,7 +597,7 @@ fun AppRoot() {
           clientName = ""
           clientPhone = ""
           clientId = ""
-          transactionCode = generateTransactionCode()
+          transactionCode = generateTransactionCode(savedDealCounter)
         },
         onUpdateDealInfo = { dealId, name, phone, savedClientId, savedTransactionCode ->
           val index = savedDeals.indexOfFirst { it.id == dealId }
@@ -627,46 +764,13 @@ private fun IncomingCallApprovalPopup(
   }
 }
 
-private fun List<InventoryItem>.upsert(item: InventoryItem): List<InventoryItem> {
-  val existingIndex = indexOfFirst { it.id == item.id }
-  return if (existingIndex >= 0) {
-    toMutableList().apply { set(existingIndex, item) }
-  } else {
-    listOf(item) + this
-  }
-}
 
-private fun List<CartProductItem>.mergeCartItems(additions: List<CartProductItem>): List<CartProductItem> {
-  if (additions.isEmpty()) return this
-  val merged = associateBy { it.id }.toMutableMap()
-  additions.forEach { addition ->
-    val existing = merged[addition.id]
-    merged[addition.id] = if (existing == null) {
-      addition
-    } else {
-      existing.copy(
-        quantity = existing.quantity + addition.quantity,
-        imageUri = existing.imageUri ?: addition.imageUri,
-      )
-    }
-  }
-  val existingIds = map { it.id }.toSet()
-  val appended = additions.filter { it.id !in existingIds }
-  return map { item -> merged.getValue(item.id) } + appended
-}
 
-private fun generateTransactionCode(): String {
-  val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-  val randomSuffix = buildString {
-    repeat(6) {
-      append(TransactionCodeAlphabet[SecureRandomHolder.random.nextInt(TransactionCodeAlphabet.length)])
-    }
-  }
-  return "TX-$timestamp-$randomSuffix"
-}
-
-private const val TransactionCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-private object SecureRandomHolder {
-  val random = SecureRandom()
+private fun nextInvoiceCounter(deals: List<SavedDeal>): Int {
+  val lastInvoiceNumber = deals.maxOfOrNull { deal ->
+    deal.transactionCode.substringAfterLast('-').toIntOrNull()
+      ?: deal.id.takeLastWhile(Char::isDigit).toIntOrNull()
+      ?: 0
+  } ?: 0
+  return maxOf(InvoiceNumberStart, lastInvoiceNumber + 1)
 }

@@ -10,6 +10,8 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import com.ashokvatika.app.R
+import com.ashokvatika.domain.model.OpenCartRow
+import com.ashokvatika.domain.model.SavedDeal
 import java.io.ByteArrayOutputStream
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -355,9 +357,11 @@ private fun OpenCartRow.invoiceDisplayAmount(): Int {
 }
 
 private fun buildInvoiceNumber(deal: SavedDeal): String {
+  val transactionDigits = deal.transactionCode.takeLastWhile(Char::isDigit)
+  if (transactionDigits.isNotBlank()) return transactionDigits
+
   val trailingDigits = deal.id.takeLastWhile(Char::isDigit)
-  val source = trailingDigits.takeLast(6).ifBlank { deal.transactionCode.takeLast(6) }
-  return source.ifBlank { "000001" }
+  return trailingDigits.takeLast(6).ifBlank { "26" }
 }
 
 private fun wrapParagraphsForLetterhead(

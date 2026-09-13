@@ -97,6 +97,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
@@ -152,15 +153,21 @@ import androidx.compose.material.icons.filled.WbSunny
 import com.ashokvatika.app.R
 import com.ashokvatika.config.AppExperimentManager
 import com.ashokvatika.config.GalleryShareSheetVariant
-import com.ashokvatika.data.AdminAccessRequest
-import com.ashokvatika.data.LiveCartPlant
-import com.ashokvatika.data.LiveCustomerSession
+import com.ashokvatika.domain.model.AdminAccessRequest
+import com.ashokvatika.domain.model.LiveCartPlant
+import com.ashokvatika.domain.model.LiveCustomerSession
 import com.ashokvatika.ui.components.AshokvatikaLogo
 import com.ashokvatika.ui.components.BrandButtonGlyph
 import com.ashokvatika.ui.components.BrandButtonIcon
 import com.ashokvatika.ui.components.BrandGreen
 import com.ashokvatika.ui.components.BrandOrange
 import com.ashokvatika.ui.components.NumericKeypad
+import com.ashokvatika.domain.model.CartProductItem
+import com.ashokvatika.domain.model.DashboardDestination
+import com.ashokvatika.domain.model.InventoryItem
+import com.ashokvatika.domain.model.OpenCartRow
+import com.ashokvatika.domain.model.SavedDeal
+import com.ashokvatika.domain.usecase.generateTransactionCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -220,18 +227,6 @@ private fun isPhoneScreen(maxWidth: Dp): Boolean = maxWidth < 600.dp
 
 private fun isCompactPhoneScreen(maxWidth: Dp, maxHeight: Dp): Boolean =
   isPhoneScreen(maxWidth) && (maxWidth < 430.dp || maxHeight < 900.dp)
-
-enum class DashboardDestination(
-  val title: String,
-) {
-  OTC("OTC"),
-  Plants("Plants"),
-  Supplies("Supplies"),
-  Pots("Pots"),
-  Docs("Docs"),
-  Live("Live"),
-  Art("Art"),
-}
 
 private data class DashboardTileItem(
   val destination: DashboardDestination,
@@ -434,57 +429,6 @@ private fun MenuHubHeader(
   }
 }
 
-data class InventoryItem(
-  val id: String,
-  val category: DashboardDestination,
-  val name: String,
-  val batch: String,
-  val sale: String,
-  val rent: String,
-  val details: String,
-  val price: String,
-  val landingPrice: String,
-  val checkout: String,
-  val vendorName: String = "",
-  val vendorPhone: String = "",
-  val vendorEmail: String = "",
-  val imageUri: String?,
-  val mediaUris: List<String> = emptyList(),
-  val status: String = "complete",
-  val templatePrimaryTitle: String = "",
-  val templatePrimaryDescription: String = "",
-  val templateSecondaryTitle: String = "",
-  val templateSecondaryDescription: String = "",
-  val templateContact: String = "",
-)
-
-data class CartProductItem(
-  val id: String,
-  val name: String,
-  val shortName: String,
-  val mrp: Int,
-  val landingPrice: Int,
-  val quantity: Int,
-  val imageUri: String? = null,
-)
-
-data class OpenCartRow(
-  val id: String,
-  val title: String,
-  val items: List<CartProductItem>,
-  val customAmount: Int? = null,
-)
-
-data class SavedDeal(
-  val id: String,
-  val title: String,
-  val clientName: String,
-  val clientPhone: String,
-  val clientId: String,
-  val transactionCode: String,
-  val rows: List<OpenCartRow>,
-)
-
 private data class PendingInvoiceExport(
   val fileName: String,
   val pdfBytes: ByteArray,
@@ -666,6 +610,7 @@ fun AdminHomeScreen(
 fun DocsHomeScreen(
   onBack: () -> Unit,
   onOpenAddress: () -> Unit,
+  onOpenInvoice: () -> Unit,
   onOpenLetterhead: () -> Unit,
   onOpenArt: () -> Unit,
 ) {
@@ -756,6 +701,7 @@ fun DocsHomeScreen(
                 onClick = {
                   when (item.title) {
                     "Address" -> onOpenAddress()
+                    "Invoice" -> onOpenInvoice()
                     "Letterhead" -> onOpenLetterhead()
                     "Art" -> onOpenArt()
                   }
@@ -933,15 +879,18 @@ fun ArtHomeScreen(
 fun LiveHomeScreen(
   onBack: () -> Unit,
   liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
   syncMessage: String?,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
 ) {
   val fontFamily = rememberDashboardFont()
   val scrollState = rememberScrollState()
-  val activeSessions = liveSessions.count { it.isLoggedIn }
-  val plantsInCarts = liveSessions.sumOf { session ->
+  val activeLiveSessions = liveSessions.filter { session -> session.isLoggedIn }
+  val activeSessions = activeLiveSessions.size
+  val plantsInCarts = activeLiveSessions.sumOf { session ->
     session.cartItems.sumOf { item -> item.quantity.coerceAtLeast(1) }
   }
-  val latestSync = liveSessions
+  val latestSync = activeLiveSessions
     .maxByOrNull { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
     ?.updatedAt
 
@@ -1014,7 +963,7 @@ fun LiveHomeScreen(
         )
       }
 
-      if (liveSessions.isEmpty()) {
+      if (activeLiveSessions.isEmpty()) {
         Surface(
           modifier = Modifier.width(layout.contentWidth),
           shape = CardShape,
@@ -1036,7 +985,7 @@ fun LiveHomeScreen(
               ),
             )
             Text(
-              text = "Once the customer app writes session data, this page will show login state, session time, and the plants added to cart.",
+              text = "Once a customer is logged in, this page will show the active session, session time, and plants added to cart.",
               color = Ink.copy(alpha = 0.68f),
               style = TextStyle(
                 fontFamily = fontFamily,
@@ -1052,12 +1001,14 @@ fun LiveHomeScreen(
           modifier = Modifier.width(layout.contentWidth),
           verticalArrangement = Arrangement.spacedBy(sectionSpacing),
         ) {
-          liveSessions.forEach { session ->
+          activeLiveSessions.forEach { session ->
             LiveSessionCard(
               session = session,
+              inventoryItems = inventoryItems,
               fontFamily = fontFamily,
               compactScreen = compactScreen,
               phoneScreen = phoneScreen,
+              onAddProductToCart = onAddProductToCart,
             )
           }
         }
@@ -1132,11 +1083,14 @@ private fun LiveSummaryCard(
 @Composable
 private fun LiveSessionCard(
   session: LiveCustomerSession,
+  inventoryItems: List<InventoryItem>,
   fontFamily: FontFamily,
   compactScreen: Boolean,
   phoneScreen: Boolean,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
 ) {
   var expanded by rememberSaveable(session.sessionId) { mutableStateOf(false) }
+  var showProductPicker by rememberSaveable(session.sessionId) { mutableStateOf(false) }
   Surface(
     shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
     color = Color.White,
@@ -1237,7 +1191,7 @@ private fun LiveSessionCard(
 
         if (expanded) {
           Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             LiveDetailLine(
               label = "Session started",
@@ -1257,10 +1211,28 @@ private fun LiveSessionCard(
               fontFamily = fontFamily,
               compactScreen = compactScreen,
             )
+            LiveAddProductButton(
+              enabled = inventoryItems.isNotEmpty(),
+              fontFamily = fontFamily,
+              onClick = { showProductPicker = true },
+            )
           }
         }
       }
     }
+  }
+
+  if (showProductPicker) {
+    LiveProductPickerDialog(
+      session = session,
+      inventoryItems = inventoryItems,
+      fontFamily = fontFamily,
+      onDismiss = { showProductPicker = false },
+      onAddProduct = { item ->
+        onAddProductToCart(session, item)
+        showProductPicker = false
+      },
+    )
   }
 }
 
@@ -1549,6 +1521,187 @@ private fun LiveDetailLine(
         fontSize = if (compactScreen) 14.sp else 15.sp,
       ),
     )
+  }
+}
+
+@Composable
+private fun LiveAddProductButton(
+  enabled: Boolean,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = if (enabled) Accent.copy(alpha = 0.1f) else PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+    modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        imageVector = Icons.Filled.ShoppingCart,
+        contentDescription = "Add product to customer cart",
+        tint = if (enabled) Accent else Ink.copy(alpha = 0.35f),
+        modifier = Modifier.size(18.dp),
+      )
+      Text(
+        text = if (enabled) "Add product to cart" else "Inventory unavailable",
+        color = if (enabled) Accent else Ink.copy(alpha = 0.48f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 14.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveProductPickerDialog(
+  session: LiveCustomerSession,
+  inventoryItems: List<InventoryItem>,
+  fontFamily: FontFamily,
+  onDismiss: () -> Unit,
+  onAddProduct: (InventoryItem) -> Unit,
+) {
+  val products = inventoryItems
+    .filter { item ->
+      item.category == DashboardDestination.Plants ||
+        item.category == DashboardDestination.Pots ||
+        item.category == DashboardDestination.Supplies
+    }
+    .sortedWith(compareBy<InventoryItem> { it.category.title }.thenBy { it.name.lowercase(Locale.US) })
+
+  Dialog(onDismissRequest = onDismiss) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(0.94f),
+      shape = CardShape,
+      color = Color.White,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+          ) {
+            Text(
+              text = "Add to cart",
+              color = Ink,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
+            )
+            Text(
+              text = session.customerName.ifBlank { "Customer" },
+              color = Accent.copy(alpha = 0.78f),
+              maxLines = 1,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
+            )
+          }
+          CircleIconAction(
+            size = 38.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close",
+                tint = Accent,
+              )
+            },
+            onClick = onDismiss,
+          )
+        }
+
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 420.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          items(products, key = { item -> item.id }) { item ->
+            LiveProductPickerRow(
+              item = item,
+              fontFamily = fontFamily,
+              onClick = { onAddProduct(item) },
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LiveProductPickerRow(
+  item: InventoryItem,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(onClick = onClick),
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Surface(
+        modifier = Modifier.size(42.dp),
+        shape = CircleShape,
+        color = Accent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Text(
+            text = liveCartInitials(item.name),
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 13.sp),
+          )
+        }
+      }
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          text = item.name,
+          color = Ink,
+          maxLines = 1,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
+        )
+        Text(
+          text = "${item.category.title} | Rs ${formatAmount(item.price.orZero().toIntOrNull() ?: 0)}",
+          color = Ink.copy(alpha = 0.58f),
+          maxLines = 1,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp),
+        )
+      }
+      Icon(
+        imageVector = Icons.Filled.Add,
+        contentDescription = "Add product",
+        tint = Accent,
+        modifier = Modifier.size(22.dp),
+      )
+    }
   }
 }
 
@@ -2125,6 +2278,458 @@ private fun buildLetterheadFileName(): String {
   return "ASHOKVATIKA_letterhead_${System.currentTimeMillis()}.pdf"
 }
 
+private data class InvoiceDraftLine(
+  val id: Long,
+  val description: String,
+  val quantity: String,
+  val unitPrice: String,
+)
+
+@Composable
+fun InvoiceCreateScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val fontFamily = rememberDashboardFont()
+  var clientName by rememberSaveable { mutableStateOf("") }
+  var clientPhone by rememberSaveable { mutableStateOf("") }
+  var clientId by rememberSaveable { mutableStateOf("") }
+  var transactionCode by rememberSaveable { mutableStateOf(generateTransactionCode()) }
+  val invoiceLines = remember {
+    mutableStateListOf(
+      InvoiceDraftLine(
+        id = System.currentTimeMillis(),
+        description = "Plant purchase",
+        quantity = "1",
+        unitPrice = "",
+      ),
+    )
+  }
+  var pendingExport by remember { mutableStateOf<PendingInvoiceExport?>(null) }
+  val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+    val export = pendingExport
+    pendingExport = null
+    if (export == null) {
+      return@rememberLauncherForActivityResult
+    }
+    scope.launch {
+      val saved = if (uri == null) {
+        false
+      } else {
+        withContext(Dispatchers.IO) {
+          runCatching {
+            context.contentResolver.openOutputStream(uri, "rwt")?.use { stream ->
+              stream.write(export.pdfBytes)
+              stream.flush()
+            } != null
+          }.getOrDefault(false)
+        }
+      }
+      Toast.makeText(
+        context,
+        when {
+          uri == null -> "Invoice export was skipped."
+          saved -> "Invoice PDF saved successfully."
+          else -> "Invoice PDF save failed."
+        },
+        Toast.LENGTH_SHORT,
+      ).show()
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val contentWidth = when {
+      maxWidth >= 1000.dp -> 760.dp
+      maxWidth >= 700.dp -> 680.dp
+      else -> minOf(maxWidth, 560.dp)
+    }
+    val titleSize = when {
+      maxWidth >= 1000.dp -> 44.sp
+      maxWidth >= 700.dp -> 38.sp
+      compactScreen -> 25.sp
+      else -> 30.sp
+    }
+    val contentTopPadding = header.headerTopPadding + if (isPhoneScreen(maxWidth)) 24.dp else 34.dp
+    val validLines = invoiceLines.mapNotNull { line ->
+      val quantity = line.quantity.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 0
+      val unitPrice = line.unitPrice.filter(Char::isDigit).toIntOrNull() ?: 0
+      if (line.description.isBlank() || quantity <= 0 || unitPrice <= 0) {
+        null
+      } else {
+        line to (quantity to unitPrice)
+      }
+    }
+    val totalAmount = validLines.sumOf { (_, amount) -> amount.first * amount.second }
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(top = contentTopPadding, bottom = 28.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(if (compactScreen) 14.dp else 18.dp),
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(if (compactScreen) 0.68f else 0.52f),
+        textSize = if (compactScreen) 42.sp else 58.sp,
+        markSize = if (compactScreen) 92.dp else 128.dp,
+      )
+
+      Text(
+        text = "Create Invoice",
+        color = Ink,
+        textAlign = TextAlign.Center,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = titleSize,
+          lineHeight = titleSize * 1.08f,
+        ),
+      )
+
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .shadow(12.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+        shape = CardShape,
+        color = Panel,
+        border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Column(
+          modifier = Modifier.padding(if (compactScreen) 14.dp else 18.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          InvoiceDraftField(
+            label = "Client name",
+            value = clientName,
+            placeholder = "Walk-in customer",
+            fontFamily = fontFamily,
+            onValueChange = { clientName = it },
+          )
+          InvoiceDraftField(
+            label = "Phone",
+            value = clientPhone,
+            placeholder = "Customer phone",
+            fontFamily = fontFamily,
+            numeric = true,
+            onValueChange = { clientPhone = it.filter(Char::isDigit) },
+          )
+          InvoiceDraftField(
+            label = "Client ID",
+            value = clientId,
+            placeholder = "Optional",
+            fontFamily = fontFamily,
+            onValueChange = { clientId = it },
+          )
+          InvoiceDraftField(
+            label = "Transaction / POS",
+            value = transactionCode,
+            placeholder = "Invoice reference",
+            fontFamily = fontFamily,
+            onValueChange = { transactionCode = it.uppercase(Locale.US) },
+          )
+        }
+      }
+
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        invoiceLines.forEachIndexed { index, line ->
+          InvoiceLineEditor(
+            line = line,
+            index = index,
+            canRemove = invoiceLines.size > 1,
+            fontFamily = fontFamily,
+            onLineChange = { updated -> invoiceLines[index] = updated },
+            onRemove = { invoiceLines.removeAt(index) },
+          )
+        }
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        ActionButtonCard(
+          title = "Add item",
+          color = AccentGreen,
+          fontFamily = fontFamily,
+          onClick = {
+            invoiceLines += InvoiceDraftLine(
+              id = System.currentTimeMillis() + invoiceLines.size,
+              description = "",
+              quantity = "1",
+              unitPrice = "",
+            )
+          },
+          modifier = Modifier.weight(1f),
+        )
+        Surface(
+          modifier = Modifier
+            .weight(1f)
+            .shadow(10.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+          shape = CardShape,
+          color = Accent,
+          tonalElevation = 0.dp,
+          shadowElevation = 0.dp,
+        ) {
+          Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+          ) {
+            Text(
+              text = "Total",
+              color = Color.White.copy(alpha = 0.82f),
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp),
+            )
+            Text(
+              text = "₹${formatAmount(totalAmount)}",
+              color = Color.White,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 20.sp),
+            )
+          }
+        }
+      }
+
+      ActionButtonCard(
+        title = "Create invoice PDF",
+        color = Accent,
+        fontFamily = fontFamily,
+        onClick = {
+          if (validLines.isEmpty()) {
+            Toast.makeText(context, "Add at least one item with amount.", Toast.LENGTH_SHORT).show()
+            return@ActionButtonCard
+          }
+          val deal = SavedDeal(
+            id = "manual-invoice-${System.currentTimeMillis()}",
+            title = "Manual Invoice",
+            clientName = clientName.ifBlank { "Walk-in customer" },
+            clientPhone = clientPhone.filter(Char::isDigit),
+            clientId = clientId.trim(),
+            transactionCode = transactionCode.ifBlank { generateTransactionCode() },
+            rows = validLines.mapIndexed { rowIndex, (line, amount) ->
+              val quantity = amount.first
+              val unitPrice = amount.second
+              OpenCartRow(
+                id = "manual-invoice-row-${line.id}",
+                title = line.description.ifBlank { "Item ${rowIndex + 1}" },
+                items = listOf(
+                  CartProductItem(
+                    id = "manual-invoice-item-${line.id}",
+                    name = line.description.ifBlank { "Item ${rowIndex + 1}" },
+                    shortName = buildInvoiceShortName(line.description),
+                    mrp = unitPrice,
+                    landingPrice = unitPrice,
+                    quantity = quantity,
+                  ),
+                ),
+              )
+            },
+          )
+          val pdfBytes = runCatching { buildInvoicePdf(context, deal) }.getOrNull()
+          if (pdfBytes == null) {
+            Toast.makeText(context, "Invoice PDF generation failed.", Toast.LENGTH_SHORT).show()
+          } else {
+            val export = PendingInvoiceExport(
+              fileName = buildInvoiceFileName(deal),
+              pdfBytes = pdfBytes,
+            )
+            pendingExport = export
+            exportLauncher.launch(export.fileName)
+          }
+        },
+        modifier = Modifier.fillMaxWidth(),
+      )
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+private fun InvoiceLineEditor(
+  line: InvoiceDraftLine,
+  index: Int,
+  canRemove: Boolean,
+  fontFamily: FontFamily,
+  onLineChange: (InvoiceDraftLine) -> Unit,
+  onRemove: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .shadow(10.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+    shape = CardShape,
+    color = PanelTint,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Text(
+          text = "Item ${index + 1}",
+          color = Ink,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp),
+        )
+        if (canRemove) {
+          CircleIconAction(
+            size = 34.dp,
+            borderColor = Accent,
+            borderWidth = 1.dp,
+            shadowElevation = 4.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Remove item",
+                tint = Accent,
+                modifier = Modifier.size(16.dp),
+              )
+            },
+            onClick = onRemove,
+          )
+        }
+      }
+      InvoiceDraftField(
+        label = "Description",
+        value = line.description,
+        placeholder = "Product or service",
+        fontFamily = fontFamily,
+        onValueChange = { onLineChange(line.copy(description = it)) },
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        InvoiceDraftField(
+          label = "Qty",
+          value = line.quantity,
+          placeholder = "1",
+          fontFamily = fontFamily,
+          numeric = true,
+          modifier = Modifier.weight(0.42f),
+          onValueChange = { onLineChange(line.copy(quantity = it.filter(Char::isDigit))) },
+        )
+        InvoiceDraftField(
+          label = "Amount",
+          value = line.unitPrice,
+          placeholder = "0",
+          fontFamily = fontFamily,
+          numeric = true,
+          modifier = Modifier.weight(0.58f),
+          onValueChange = { onLineChange(line.copy(unitPrice = it.filter(Char::isDigit))) },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun InvoiceDraftField(
+  label: String,
+  value: String,
+  placeholder: String,
+  fontFamily: FontFamily,
+  onValueChange: (String) -> Unit,
+  modifier: Modifier = Modifier,
+  numeric: Boolean = false,
+) {
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Text(
+      text = label,
+      color = Ink.copy(alpha = 0.62f),
+      style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 13.sp),
+    )
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+      color = Color.White,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 12.dp, vertical = 12.dp),
+        singleLine = true,
+        cursorBrush = SolidColor(Accent),
+        keyboardOptions = KeyboardOptions(
+          keyboardType = if (numeric) androidx.compose.ui.text.input.KeyboardType.Number else androidx.compose.ui.text.input.KeyboardType.Text,
+          imeAction = ImeAction.Done,
+        ),
+        textStyle = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 16.sp,
+          color = Ink,
+        ),
+        decorationBox = { innerTextField ->
+          Box(modifier = Modifier.fillMaxWidth()) {
+            if (value.isBlank()) {
+              Text(
+                text = placeholder,
+                color = Ink.copy(alpha = 0.22f),
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 16.sp,
+                ),
+              )
+            }
+            innerTextField()
+          }
+        },
+      )
+    }
+  }
+}
+
+private fun buildInvoiceShortName(description: String): String {
+  return description
+    .split(Regex("\\s+"))
+    .filter { it.isNotBlank() }
+    .take(2)
+    .joinToString("") { it.take(1).uppercase(Locale.US) }
+    .ifBlank { "IN" }
+}
 @Composable
 fun ArtBrochureScreen(
   onBack: () -> Unit,
@@ -6279,6 +6884,9 @@ private fun OtcCarouselCard(
 @Composable
 fun OpenCartScreen(
   rows: List<OpenCartRow>,
+  liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
+  liveSyncMessage: String?,
   clientName: String,
   clientPhone: String,
   clientId: String,
@@ -6297,6 +6905,7 @@ fun OpenCartScreen(
   onDeleteItem: (String, String) -> Unit,
   onDeleteRow: (String) -> Unit,
   onClearCart: () -> Unit,
+  onAddProductToLiveCart: (LiveCustomerSession, InventoryItem) -> Unit,
   onSaveDeal: (SavedDeal) -> Unit,
 ) {
   val fontFamily = rememberDashboardFont()
@@ -6465,6 +7074,18 @@ fun OpenCartScreen(
           .fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
+        item {
+          OpenCartLiveSessionsSection(
+            liveSessions = liveSessions,
+            inventoryItems = inventoryItems,
+            syncMessage = liveSyncMessage,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+            phoneScreen = phoneScreen,
+            onAddProductToCart = onAddProductToLiveCart,
+          )
+        }
+
         if (rows.isEmpty()) {
           item {
             EmptyStateCard(
@@ -6615,6 +7236,119 @@ fun OpenCartScreen(
           }
         },
       )
+    }
+  }
+}
+
+@Composable
+private fun OpenCartLiveSessionsSection(
+  liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
+  syncMessage: String?,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+  phoneScreen: Boolean,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
+) {
+  val sortedSessions = liveSessions.sortedWith(
+    compareByDescending<LiveCustomerSession> { session -> session.isLoggedIn }
+      .thenByDescending { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+      .thenBy { session -> session.customerName.lowercase(Locale.US) },
+  )
+  val activeSessions = sortedSessions.count { session -> session.isLoggedIn }
+  val plantsInCarts = sortedSessions.sumOf { session ->
+    session.cartItems.sumOf { item -> item.quantity.coerceAtLeast(1) }
+  }
+  val latestSync = sortedSessions
+    .maxByOrNull { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+    ?.updatedAt
+
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = CardShape,
+      color = Color.White,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Text(
+          text = "Live customer sessions",
+          color = Ink,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 28.sp else 32.sp,
+          ),
+        )
+        Text(
+          text = "Track who is logged in on the customer app, how long the session has been active, and which plants are sitting in the cart.",
+          color = Ink.copy(alpha = 0.68f),
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 15.sp else 17.sp,
+            lineHeight = if (compactScreen) 20.sp else 22.sp,
+          ),
+        )
+        if (!syncMessage.isNullOrBlank() || !latestSync.isNullOrBlank()) {
+          Text(
+            text = syncMessage ?: "Last synced ${formatLiveUiTimestamp(latestSync)}",
+            color = if (!syncMessage.isNullOrBlank()) Accent else AccentGreen,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = if (compactScreen) 14.sp else 15.sp,
+            ),
+          )
+        }
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      LiveSummaryCard(
+        modifier = Modifier.weight(1f),
+        title = "Active now",
+        value = activeSessions.toString(),
+        caption = if (activeSessions == 1) "customer logged in" else "customers logged in",
+        fontFamily = fontFamily,
+        compactScreen = compactScreen,
+      )
+      LiveSummaryCard(
+        modifier = Modifier.weight(1f),
+        title = "Plants in carts",
+        value = plantsInCarts.toString(),
+        caption = if (plantsInCarts == 1) "plant selected" else "plants selected",
+        fontFamily = fontFamily,
+        compactScreen = compactScreen,
+      )
+    }
+
+    if (sortedSessions.isEmpty()) {
+      EmptyStateCard(
+        text = "Waiting for customer app sync. Logged-in customer sessions will appear here inside the inventory cart.",
+        fontFamily = fontFamily,
+      )
+    } else {
+      sortedSessions.forEach { session ->
+        LiveSessionCard(
+          session = session,
+          inventoryItems = inventoryItems,
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+          phoneScreen = phoneScreen,
+          onAddProductToCart = onAddProductToCart,
+        )
+      }
     }
   }
 }
@@ -12777,7 +13511,8 @@ private data class OtcCarouselItem(
 private fun otcCatalog(): List<OtcCarouselItem> {
   val liveItems = LiveInventoryCatalog.inventoryByDestination
     .filterKeys { destination ->
-      destination == DashboardDestination.Plants ||
+      destination == DashboardDestination.OTC ||
+        destination == DashboardDestination.Plants ||
         destination == DashboardDestination.Pots ||
         destination == DashboardDestination.Supplies
     }
@@ -12807,44 +13542,10 @@ private fun otcCatalog(): List<OtcCarouselItem> {
         imageUri = item.mediaUris.firstOrNull() ?: item.imageUri,
       )
     }
-
-  if (liveItems.isNotEmpty()) return liveItems
-
-  return listOf(
-    OtcCarouselItem("plant-1", OtcCarouselCategory.Plant, "Bamboo 3 Lucky", "B3", "1200", "820"),
-    OtcCarouselItem("plant-2", OtcCarouselCategory.Plant, "Money Plant", "MP", "650", "430"),
-    OtcCarouselItem("plant-3", OtcCarouselCategory.Plant, "Snake Plant", "SP", "850", "580"),
-    OtcCarouselItem("plant-4", OtcCarouselCategory.Plant, "Areca Palm", "AP", "1400", "960"),
-    OtcCarouselItem("plant-5", OtcCarouselCategory.Plant, "Jade Plant", "JP", "520", "340"),
-    OtcCarouselItem("plant-6", OtcCarouselCategory.Plant, "Peace Lily", "PL", "950", "650"),
-    OtcCarouselItem("pots-1", OtcCarouselCategory.Pots, "Terracotta Pot", "TP", "900", "610"),
-    OtcCarouselItem("pots-2", OtcCarouselCategory.Pots, "Ceramic Pot", "CP", "750", "520"),
-    OtcCarouselItem("pots-3", OtcCarouselCategory.Pots, "Hanging Pot", "HP", "680", "470"),
-    OtcCarouselItem("pots-4", OtcCarouselCategory.Pots, "Table Pot", "TB", "420", "290"),
-    OtcCarouselItem("pots-5", OtcCarouselCategory.Pots, "Round Pot", "RP", "560", "380"),
-    OtcCarouselItem("pots-6", OtcCarouselCategory.Pots, "Tall Planter", "TL", "1100", "760"),
-    OtcCarouselItem("supplies-1", OtcCarouselCategory.Supplies, "Garden Mix", "GM", "640", "440"),
-    OtcCarouselItem("supplies-2", OtcCarouselCategory.Supplies, "Cocopeat", "CP", "320", "210"),
-    OtcCarouselItem("supplies-3", OtcCarouselCategory.Supplies, "Fertilizer", "FT", "450", "310"),
-    OtcCarouselItem("supplies-4", OtcCarouselCategory.Supplies, "Neem Spray", "NS", "360", "250"),
-    OtcCarouselItem("supplies-5", OtcCarouselCategory.Supplies, "Plant Food", "PF", "390", "270"),
-    OtcCarouselItem("supplies-6", OtcCarouselCategory.Supplies, "Pebbles", "PB", "280", "190"),
-  )
+  return liveItems
 }
 
-private fun buildProductCatalog(): List<BuildProductItem> {
-  return listOf(
-    BuildProductItem("pots-ceramic-oak-green", BuildProductCategory.Pots, "Ceramic oak green", 74, 150, "COG"),
-    BuildProductItem("pots-ceramic-sandy-aqua", BuildProductCategory.Pots, "Ceramic sandy aqua", 20, 180, "CSA"),
-    BuildProductItem("pots-ceramic-sandy-brown", BuildProductCategory.Pots, "Ceramic sandy brown", 8, 270, "CSB"),
-    BuildProductItem("pots-clay-oak", BuildProductCategory.Pots, "Clay oak", 59, 125, "CO"),
-    BuildProductItem("pots-plastic-oggy-white", BuildProductCategory.Pots, "Plastic oggy white", 198, 140, "POW"),
-    BuildProductItem("supplies-bridge", BuildProductCategory.Supplies, "Bridge", 17, 380, "BR"),
-    BuildProductItem("supplies-fairy-resting", BuildProductCategory.Supplies, "Fairy resting", 12, 250, "FR"),
-    BuildProductItem("supplies-pebbles-mix", BuildProductCategory.Supplies, "Pebbles mix", 31, 120, "PM"),
-    BuildProductItem("supplies-mini-fence", BuildProductCategory.Supplies, "Mini fence", 22, 90, "MF"),
-  )
-}
+private fun buildProductCatalog(): List<BuildProductItem> = emptyList()
 
 private fun currentDateLabel(): String {
   val today = java.util.Calendar.getInstance()
