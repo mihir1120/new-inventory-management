@@ -1,3 +1,6 @@
+server:
+  address: 127.0.0.1
+
 spring:
   datasource:
     url: jdbc:h2:mem:ashokvatika;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1

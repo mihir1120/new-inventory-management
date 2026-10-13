@@ -2,6 +2,7 @@ package com.ashokvatika.data
 
 import android.content.ContentValues
 import android.content.ContentResolver
+import android.content.ContentProviderOperation
 import android.content.Context
 import android.database.ContentObserver
 import android.database.Cursor
@@ -22,12 +23,21 @@ import com.ashokvatika.domain.model.LiveCartPlant
 import com.ashokvatika.domain.model.LiveCustomerSession
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.MutableData
+import com.google.firebase.database.Transaction
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.ktx.database
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -36,6 +46,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 private const val AccessRequestsCollection = "access_requests"
 private const val InventoryCollection = "inventory_items"
@@ -55,48 +67,140 @@ class LocalBridgeObservation(
 class AdminFirestoreRepository(
   private val context: Context,
 ) {
+  private val cacheIoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val firestore by lazy { Firebase.firestore }
   private val realtimeDatabase by lazy { Firebase.database.reference.child(AccessRequestsCollection) }
+  private val inventoryDatabase by lazy { Firebase.database.reference.child(InventoryCollection) }
+  private val savedDealsDatabase by lazy { Firebase.database.reference.child(SavedDealsCollection) }
   private val liveSessionsDatabase by lazy { Firebase.database.reference.child(LiveSessionsCollection) }
+
+  fun loadSavedDealsLocally(pendingOnly: Boolean = false): List<SavedDeal> {
+    return LocalBridgeDatabaseHelper(context).use { helper ->
+      helper.readableDatabase.query("saved_deals_local", arrayOf("payload"),
+        if (pendingOnly) "pending = 1" else null, null, null, null, null).use { cursor ->
+        buildList {
+          while (cursor.moveToNext()) {
+            val json = JSONObject(cursor.getString(0))
+            val rows = json.getJSONArray("rows")
+            add(SavedDeal(
+              id = json.getString("id"), title = json.getString("title"),
+              clientName = json.optString("clientName"), clientPhone = json.optString("clientPhone"),
+              clientId = json.optString("clientId"), transactionCode = json.optString("transactionCode"),
+              rows = (0 until rows.length()).mapNotNull { rows.getJSONObject(it).toPlainMap().toOpenCartRow() },
+            ))
+          }
+        }
+      }
+    }
+  }
+
+  fun cacheSavedDeal(deal: SavedDeal, pending: Boolean = true) {
+    LocalBridgeDatabaseHelper(context).use { helper ->
+      val values = ContentValues().apply {
+        put("id", deal.id)
+        put("payload", JSONObject(deal.toRemoteSavedDealPayload(currentTimestamp())).toString())
+        put("pending", if (pending) 1 else 0)
+      }
+      check(helper.writableDatabase.insertWithOnConflict("saved_deals_local", null, values,
+        android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "Unable to save deal on this device" }
+    }
+  }
 
   fun observeInventory(
     onUpdate: (List<InventoryItem>) -> Unit,
     onError: (Throwable) -> Unit,
-  ): ListenerRegistration {
-    return firestore.collection(InventoryCollection)
+  ): LocalBridgeObservation {
+    val realtimeItems = mutableMapOf<String, InventoryItem>()
+    val firestoreItems = mutableMapOf<String, InventoryItem>()
+
+    fun publishMergedItems() {
+      val items = (realtimeItems.values + firestoreItems.values)
+        .associateBy { it.id }
+        .values
+        .sortedWith(
+          compareBy<InventoryItem> { it.category.title }
+            .thenByDescending { it.id.inventorySequence() }
+            .thenBy { it.name.lowercase(Locale.US) },
+        )
+      // An empty first snapshot can mean that Firebase is still loading or that this
+      // install has no remote data yet. Keep the local cache until an actual item
+      // arrives; explicit item deletion already removes it from the local bridge.
+      if (items.isNotEmpty()) {
+        val snapshotItems = items.toList()
+        cacheIoScope.launch {
+          runCatching {
+            val cachedItems = loadBridgeInventory()
+            val merged = (cachedItems + snapshotItems).associateBy { it.id }.values.toList()
+            if (merged.toSet() != cachedItems.toSet()) {
+              replaceInventoryBridgeSnapshot(merged)
+            }
+          }.onFailure { error ->
+            Log.w(BridgeLogTag, "Unable to mirror inventory snapshot locally", error)
+          }
+        }
+      }
+      onUpdate(items)
+    }
+
+    val realtimeListener = object : ValueEventListener {
+      override fun onDataChange(snapshot: DataSnapshot) {
+        realtimeItems.clear()
+        snapshot.children
+          .mapNotNull { child -> child.toRealtimeInventoryItem() }
+          .forEach { item -> realtimeItems[item.id] = item }
+        publishMergedItems()
+      }
+
+      override fun onCancelled(error: DatabaseError) {
+        onError(error.toException())
+      }
+    }
+    inventoryDatabase.addValueEventListener(realtimeListener)
+
+    val firestoreRegistration = firestore.collection(InventoryCollection)
       .addSnapshotListener { snapshot, error ->
         if (error != null) {
           onError(error)
           return@addSnapshotListener
         }
 
-        val items = snapshot?.documents.orEmpty()
+        firestoreItems.clear()
+        snapshot?.documents.orEmpty()
           .mapNotNull { document -> document.toInventoryItem() }
-          .sortedWith(
-            compareBy<InventoryItem> { it.category.title }
-              .thenByDescending { it.id.inventorySequence() }
-              .thenBy { it.name.lowercase(Locale.US) },
-          )
-        runCatching {
-          replaceInventoryBridgeSnapshot(items)
-        }.onFailure { error ->
-          Log.w(BridgeLogTag, "Unable to mirror inventory snapshot locally", error)
-        }
-        onUpdate(items)
+          .forEach { item -> firestoreItems[item.id] = item }
+        publishMergedItems()
       }
+
+    return LocalBridgeObservation {
+      inventoryDatabase.removeEventListener(realtimeListener)
+      firestoreRegistration.remove()
+    }
   }
 
   fun observePendingAccessRequests(
     onUpdate: (List<AdminAccessRequest>) -> Unit,
     onError: (Throwable) -> Unit,
   ): LocalBridgeObservation {
+    val realtimeRequests = mutableMapOf<String, AdminAccessRequest>()
+    val firestoreRequests = mutableMapOf<String, AdminAccessRequest>()
+
+    fun publishMergedRequests() {
+      val requests = (realtimeRequests.values + firestoreRequests.values)
+        .filter { it.status == "pending" }
+        .associateBy { it.requestId }
+        .values
+        .sortedBy { it.createdAt }
+      onUpdate(requests)
+    }
+
     val listener = object : ValueEventListener {
       override fun onDataChange(snapshot: DataSnapshot) {
-        val requests = snapshot.children
+        realtimeRequests.clear()
+        snapshot.children
           .mapNotNull { child -> child.toRealtimeAccessRequest() }
-          .sortedBy { it.createdAt }
           .filter { it.status == "pending" }
-        onUpdate(requests)
+          .forEach { request -> realtimeRequests[request.requestId] = request }
+        publishMergedRequests()
       }
 
       override fun onCancelled(error: DatabaseError) {
@@ -104,8 +208,24 @@ class AdminFirestoreRepository(
       }
     }
     realtimeDatabase.addValueEventListener(listener)
+    val firestoreRegistration = firestore.collection(AccessRequestsCollection)
+      .addSnapshotListener { snapshot, error ->
+        if (error != null) {
+          onError(error)
+          return@addSnapshotListener
+        }
+
+        firestoreRequests.clear()
+        snapshot?.documents.orEmpty()
+          .mapNotNull { document -> document.toAdminAccessRequest() }
+          .filter { it.status == "pending" }
+          .forEach { request -> firestoreRequests[request.requestId] = request }
+        publishMergedRequests()
+      }
+
     return LocalBridgeObservation {
       realtimeDatabase.removeEventListener(listener)
+      firestoreRegistration.remove()
     }
   }
 
@@ -123,10 +243,13 @@ class AdminFirestoreRepository(
               .thenByDescending { it.updatedAt.timestampSortKey() }
               .thenBy { it.customerName.lowercase(Locale.US) },
           )
-        runCatching {
-          replaceLiveSessionsBridgeSnapshot(sessions)
-        }.onFailure { error ->
-          Log.w(BridgeLogTag, "Unable to mirror live customer sessions locally", error)
+        val snapshotSessions = sessions.toList()
+        cacheIoScope.launch {
+          runCatching {
+            replaceLiveSessionsBridgeSnapshot(snapshotSessions)
+          }.onFailure { error ->
+            Log.w(BridgeLogTag, "Unable to mirror live customer sessions locally", error)
+          }
         }
         onUpdate(sessions)
       }
@@ -228,19 +351,55 @@ class AdminFirestoreRepository(
   fun observeSavedDeals(
     onUpdate: (List<SavedDeal>) -> Unit,
     onError: (Throwable) -> Unit,
-  ): ListenerRegistration {
-    return firestore.collection(SavedDealsCollection)
+  ): LocalBridgeObservation {
+    val realtimeDeals = mutableMapOf<String, SavedDeal>()
+    val firestoreDeals = mutableMapOf<String, SavedDeal>()
+
+    fun publishMergedDeals() {
+      val pending = loadSavedDealsLocally(pendingOnly = true)
+      val pendingIds = pending.map { it.id }.toSet()
+      val remote = (realtimeDeals.values + firestoreDeals.values).associateBy { it.id }.values
+      remote.filterNot { it.id in pendingIds }.forEach { cacheSavedDeal(it, pending = false) }
+      val deals = (loadSavedDealsLocally() + remote + pending)
+        .associateBy { it.id }
+        .values
+        .sortedByDescending { it.id.substringAfterLast('-').toLongOrNull() ?: 0L }
+      onUpdate(deals)
+    }
+
+    val realtimeListener = object : ValueEventListener {
+      override fun onDataChange(snapshot: DataSnapshot) {
+        realtimeDeals.clear()
+        snapshot.children
+          .mapNotNull { child -> child.toRealtimeSavedDeal() }
+          .forEach { deal -> realtimeDeals[deal.id] = deal }
+        publishMergedDeals()
+      }
+
+      override fun onCancelled(error: DatabaseError) {
+        onError(error.toException())
+      }
+    }
+    savedDealsDatabase.addValueEventListener(realtimeListener)
+
+    val firestoreRegistration = firestore.collection(SavedDealsCollection)
       .addSnapshotListener { snapshot, error ->
         if (error != null) {
           onError(error)
           return@addSnapshotListener
         }
 
-        val deals = snapshot?.documents.orEmpty()
+        firestoreDeals.clear()
+        snapshot?.documents.orEmpty()
           .mapNotNull { document -> document.toSavedDeal() }
-          .sortedByDescending { it.id.substringAfterLast('-').toLongOrNull() ?: 0L }
-        onUpdate(deals)
+          .forEach { deal -> firestoreDeals[deal.id] = deal }
+        publishMergedDeals()
       }
+
+    return LocalBridgeObservation {
+      savedDealsDatabase.removeEventListener(realtimeListener)
+      firestoreRegistration.remove()
+    }
   }
 
   suspend fun upsertInventoryItem(item: InventoryItem) {
@@ -258,37 +417,32 @@ class AdminFirestoreRepository(
       qrCodeValue = qrCodeValue,
     )
 
-    firestore.collection(InventoryCollection)
+    val inventoryPayload = item.toRemoteInventoryPayload(
+      updatedAt = timestamp,
+      stockCount = stockCount,
+      qrCodeValue = qrCodeValue,
+    )
+
+    val realtimeUpdateResult = runCatching {
+      inventoryDatabase.child(item.id).setValue(inventoryPayload).await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Realtime inventory save failed for ${item.id}", error)
+    }
+
+    val firestoreUpdateResult = runCatching {
+      firestore.collection(InventoryCollection)
       .document(item.id)
-      .set(
-        hashMapOf(
-          "id" to item.id,
-          "category" to item.category.name.lowercase(Locale.US),
-          "name" to item.name,
-          "details" to item.details,
-          "price" to item.price.orZero(),
-          "landingPrice" to item.landingPrice.orZero(),
-          "vendorName" to item.vendorName,
-          "vendorPhone" to item.vendorPhone,
-          "vendorEmail" to item.vendorEmail,
-          "batch" to item.batch.orZero(),
-          "sale" to item.sale.orZero(),
-          "rent" to item.rent.orZero(),
-          "stockCount" to stockCount,
-          "status" to item.status,
-          "checkout" to item.checkout.orZero(),
-          "imageUri" to item.imageUri,
-          "mediaUris" to item.mediaUris,
-          "qrCodeValue" to qrCodeValue,
-          "templatePrimaryTitle" to item.templatePrimaryTitle,
-          "templatePrimaryDescription" to item.templatePrimaryDescription,
-          "templateSecondaryTitle" to item.templateSecondaryTitle,
-          "templateSecondaryDescription" to item.templateSecondaryDescription,
-          "templateContact" to item.templateContact,
-          "updatedAt" to timestamp,
-        ),
-      )
-      .await()
+        .set(inventoryPayload)
+        .await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Firestore inventory save failed for ${item.id}", error)
+    }
+
+    if (realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
+      throw realtimeUpdateResult.exceptionOrNull()
+        ?: firestoreUpdateResult.exceptionOrNull()
+        ?: IllegalStateException("Unable to save inventory item ${item.id}")
+    }
   }
 
   suspend fun cacheInventoryItem(item: InventoryItem) {
@@ -311,46 +465,54 @@ class AdminFirestoreRepository(
   }
 
   suspend fun upsertSavedDeal(deal: SavedDeal) {
-    firestore.collection(SavedDealsCollection)
-      .document(deal.id)
-      .set(
-        hashMapOf(
-          "id" to deal.id,
-          "title" to deal.title,
-          "clientName" to deal.clientName,
-          "clientPhone" to deal.clientPhone,
-          "clientId" to deal.clientId,
-          "transactionCode" to deal.transactionCode,
-          "rows" to deal.rows.map { row ->
-            hashMapOf(
-              "id" to row.id,
-              "title" to row.title,
-              "customAmount" to row.customAmount,
-              "items" to row.items.map { item ->
-                hashMapOf(
-                  "id" to item.id,
-                  "name" to item.name,
-                  "shortName" to item.shortName,
-                  "mrp" to item.mrp,
-                  "landingPrice" to item.landingPrice,
-                  "quantity" to item.quantity,
-                  "imageUri" to item.imageUri,
-                )
-              },
-            )
-          },
-          "updatedAt" to currentTimestamp(),
-        ),
-      )
-      .await()
+    cacheSavedDeal(deal)
+    val payload = deal.toRemoteSavedDealPayload(updatedAt = currentTimestamp())
+
+    val realtimeUpdateResult = runCatching {
+      savedDealsDatabase.child(deal.id).setValue(payload).await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Realtime saved deal save failed for ${deal.id}", error)
+    }
+
+    val firestoreUpdateResult = runCatching {
+      firestore.collection(SavedDealsCollection)
+        .document(deal.id)
+        .set(payload)
+        .await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Firestore saved deal save failed for ${deal.id}", error)
+    }
+
+    if (realtimeUpdateResult.isFailure || firestoreUpdateResult.isFailure) {
+      throw realtimeUpdateResult.exceptionOrNull()
+        ?: firestoreUpdateResult.exceptionOrNull()
+        ?: IllegalStateException("Unable to save deal ${deal.id}")
+    }
+    if (loadSavedDealsLocally().firstOrNull { it.id == deal.id } == deal) {
+      cacheSavedDeal(deal, pending = false)
+    }
   }
 
   suspend fun deleteInventoryItem(itemId: String) {
     context.contentResolver.delete(LocalBridgeContract.Inventory.itemUri(itemId), null, null)
-    firestore.collection(InventoryCollection)
-      .document(itemId)
-      .delete()
-      .await()
+    val realtimeDeleteResult = runCatching {
+      inventoryDatabase.child(itemId).removeValue().await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Realtime inventory delete failed for $itemId", error)
+    }
+    val firestoreDeleteResult = runCatching {
+      firestore.collection(InventoryCollection)
+        .document(itemId)
+        .delete()
+        .await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Firestore inventory delete failed for $itemId", error)
+    }
+    if (realtimeDeleteResult.isFailure && firestoreDeleteResult.isFailure) {
+      throw realtimeDeleteResult.exceptionOrNull()
+        ?: firestoreDeleteResult.exceptionOrNull()
+        ?: IllegalStateException("Unable to delete inventory item $itemId")
+    }
   }
 
   suspend fun deleteInventoryItemLocally(itemId: String) {
@@ -380,7 +542,7 @@ class AdminFirestoreRepository(
       Log.w(BridgeLogTag, "Local access request bridge update failed for $requestId", error)
     }
 
-    runCatching {
+    val realtimeUpdateResult = runCatching {
       realtimeDatabase.child(requestId).updateChildren(
         mapOf(
           "status" to status,
@@ -390,7 +552,28 @@ class AdminFirestoreRepository(
       ).await()
     }.onFailure { error ->
       Log.w(BridgeLogTag, "Realtime access request update failed for $requestId", error)
-      throw error
+    }
+
+    val firestoreUpdateResult = runCatching {
+      firestore.collection(AccessRequestsCollection)
+        .document(requestId)
+        .set(
+          mapOf(
+            "status" to status,
+            "updatedAt" to timestamp,
+            "note" to note,
+          ),
+          SetOptions.merge(),
+        )
+        .await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Firestore access request update failed for $requestId", error)
+    }
+
+    if (realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
+      throw firestoreUpdateResult.exceptionOrNull()
+        ?: realtimeUpdateResult.exceptionOrNull()
+        ?: IllegalStateException("Unable to update access request $requestId")
     }
   }
 
@@ -405,19 +588,15 @@ class AdminFirestoreRepository(
       .child(session.sessionId)
       .child("cartItems")
       .child(item.id)
-    val existingQuantity = runCatching {
-      cartItemRef.get().await().intValue("quantity", "count")
-    }.getOrDefault(0)
     val imageUri = item.mediaUris.firstOrNull() ?: item.imageUri
+    cartItemRef.incrementCartItem(
+      itemId = item.id,
+      plantName = item.name,
+      imageUri = imageUri,
+    )
 
     liveSessionsDatabase.child(session.sessionId).updateChildren(
       mapOf(
-        "cartItems/${item.id}/itemId" to item.id,
-        "cartItems/${item.id}/plantId" to item.id,
-        "cartItems/${item.id}/plantName" to item.name,
-        "cartItems/${item.id}/name" to item.name,
-        "cartItems/${item.id}/quantity" to (existingQuantity + 1).coerceAtLeast(1),
-        "cartItems/${item.id}/imageUri" to imageUri,
         "cartUpdatedAt" to timestamp,
         "updatedAt" to timestamp,
       ),
@@ -426,23 +605,27 @@ class AdminFirestoreRepository(
 
   private fun replaceInventoryBridgeSnapshot(items: List<InventoryItem>) {
     val resolver = context.contentResolver
-    resolver.delete(LocalBridgeContract.Inventory.ContentUri, null, null)
+    val operations = arrayListOf(
+      ContentProviderOperation.newDelete(LocalBridgeContract.Inventory.ContentUri).build(),
+    )
     items.forEach { item ->
       val updatedAt = currentTimestamp()
       val stockCount =
         ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
       val qrCodeValue = "${ProductQrPrefix}${item.id}"
       val imageBase64 = resolvePreviewImageBase64(item, resolver)
-      resolver.insert(
-        LocalBridgeContract.Inventory.itemUri(item.id),
-        item.toInventoryContentValues(
+      operations.add(
+        ContentProviderOperation.newInsert(LocalBridgeContract.Inventory.itemUri(item.id)).withValues(
+          item.toInventoryContentValues(
           updatedAt = updatedAt,
           stockCount = stockCount,
           imageBase64 = imageBase64,
           qrCodeValue = qrCodeValue,
-        ),
+          ),
+        ).build(),
       )
     }
+    resolver.applyBatch(LocalBridgeContract.Authority, operations)
   }
 
   private fun replaceLiveSessionsBridgeSnapshot(sessions: List<LiveCustomerSession>) {
@@ -726,6 +909,165 @@ private fun DataSnapshot.toLiveCartPlant(): LiveCartPlant? {
   )
 }
 
+private fun DataSnapshot.toRealtimeInventoryItem(): InventoryItem? {
+  val category = stringValue("category").toDashboardDestination() ?: return null
+  val id = stringValue("id").orEmpty().ifBlank { key.orEmpty() }
+  val name = stringValue("name").orEmpty()
+  if (id.isBlank() || name.isBlank()) return null
+
+  return InventoryItem(
+    id = id,
+    category = category,
+    name = name,
+    batch = stringValue("batch").orZero(),
+    sale = stringValue("sale").orZero(),
+    rent = stringValue("rent").orZero(),
+    details = stringValue("details").orEmpty(),
+    price = stringValue("price").orZero(),
+    landingPrice = stringValue("landingPrice").orZero(),
+    checkout = stringValue("checkout").orZero(),
+    vendorName = stringValue("vendorName").orEmpty(),
+    vendorPhone = stringValue("vendorPhone").orEmpty(),
+    vendorEmail = stringValue("vendorEmail").orEmpty(),
+    imageUri = stringValue("imageUri"),
+    mediaUris = childrenList("mediaUris").filterIsInstance<String>(),
+    status = stringValue("status").orEmpty().ifBlank { "complete" },
+    templatePrimaryTitle = stringValue("templatePrimaryTitle").orEmpty(),
+    templatePrimaryDescription = stringValue("templatePrimaryDescription").orEmpty(),
+    templateSecondaryTitle = stringValue("templateSecondaryTitle").orEmpty(),
+    templateSecondaryDescription = stringValue("templateSecondaryDescription").orEmpty(),
+    templateContact = stringValue("templateContact").orEmpty(),
+  )
+}
+
+private suspend fun DatabaseReference.incrementCartItem(
+  itemId: String,
+  plantName: String,
+  imageUri: String?,
+) {
+  suspendCancellableCoroutine { continuation ->
+    runTransaction(
+      object : Transaction.Handler {
+        override fun doTransaction(currentData: MutableData): Transaction.Result {
+          val quantity = listOf("quantity", "count")
+            .firstNotNullOfOrNull { key -> currentData.child(key).getValue(Long::class.java) }
+            ?.toInt()
+            ?: 0
+          currentData.value = mapOf(
+            "itemId" to itemId,
+            "plantId" to itemId,
+            "plantName" to plantName,
+            "name" to plantName,
+            "quantity" to (quantity + 1).coerceAtLeast(1),
+            "imageUri" to imageUri,
+          )
+          return Transaction.success(currentData)
+        }
+
+        override fun onComplete(
+          error: DatabaseError?,
+          committed: Boolean,
+          currentData: DataSnapshot?,
+        ) {
+          if (!continuation.isActive) return
+          when {
+            error != null -> continuation.resumeWithException(error.toException())
+            !committed -> continuation.resumeWithException(
+              IllegalStateException("Live cart update was not committed"),
+            )
+            else -> continuation.resume(Unit)
+          }
+        }
+      },
+    )
+  }
+}
+
+private fun DataSnapshot.toRealtimeSavedDeal(): SavedDeal? {
+  val dealId = stringValue("id").orEmpty().ifBlank { key.orEmpty() }
+  if (dealId.isBlank()) return null
+
+  val rows = child("rows").children
+    .mapNotNull { rowSnapshot -> rowSnapshot.value.toOpenCartRow() }
+
+  return SavedDeal(
+    id = dealId,
+    title = stringValue("title").orEmpty().ifBlank { "Saved deal" },
+    clientName = stringValue("clientName").orEmpty(),
+    clientPhone = stringValue("clientPhone").orEmpty(),
+    clientId = stringValue("clientId").orEmpty(),
+    transactionCode = stringValue("transactionCode").orEmpty(),
+    rows = rows,
+  )
+}
+
+private fun InventoryItem.toRemoteInventoryPayload(
+  updatedAt: String,
+  stockCount: Int,
+  qrCodeValue: String,
+): Map<String, Any?> {
+  return mapOf(
+    "id" to id,
+    "category" to category.title,
+    "name" to name,
+    "batch" to batch.orZero(),
+    "sale" to sale.orZero(),
+    "rent" to rent.orZero(),
+    "details" to details,
+    "price" to price.orZero(),
+    "landingPrice" to landingPrice.orZero(),
+    "checkout" to checkout.orZero(),
+    "vendorName" to vendorName,
+    "vendorPhone" to vendorPhone,
+    "vendorEmail" to vendorEmail,
+    "imageUri" to imageUri,
+    "mediaUris" to mediaUris,
+    "status" to status.ifBlank { "complete" },
+    "stockCount" to stockCount,
+    "qrCodeValue" to qrCodeValue,
+    "templatePrimaryTitle" to templatePrimaryTitle,
+    "templatePrimaryDescription" to templatePrimaryDescription,
+    "templateSecondaryTitle" to templateSecondaryTitle,
+    "templateSecondaryDescription" to templateSecondaryDescription,
+    "templateContact" to templateContact,
+    "updatedAt" to updatedAt,
+  )
+}
+
+private fun SavedDeal.toRemoteSavedDealPayload(updatedAt: String): Map<String, Any?> {
+  return mapOf(
+    "id" to id,
+    "title" to title,
+    "clientName" to clientName,
+    "clientPhone" to clientPhone,
+    "clientId" to clientId,
+    "transactionCode" to transactionCode,
+    "rows" to rows.map { row -> row.toRemotePayload() },
+    "updatedAt" to updatedAt,
+  )
+}
+
+private fun OpenCartRow.toRemotePayload(): Map<String, Any?> {
+  return mapOf(
+    "id" to id,
+    "title" to title,
+    "customAmount" to customAmount,
+    "items" to items.map { item -> item.toRemotePayload() },
+  )
+}
+
+private fun CartProductItem.toRemotePayload(): Map<String, Any?> {
+  return mapOf(
+    "id" to id,
+    "name" to name,
+    "shortName" to shortName,
+    "mrp" to mrp,
+    "landingPrice" to landingPrice,
+    "quantity" to quantity,
+    "imageUri" to imageUri,
+  )
+}
+
 private fun com.google.firebase.firestore.DocumentSnapshot.toInventoryItem(): InventoryItem? {
   val category = getString("category").toDashboardDestination() ?: return null
   val id = getString("id").orEmpty().ifBlank { this.id }
@@ -789,6 +1131,17 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toSavedDeal(): SavedD
     transactionCode = getString("transactionCode").orEmpty(),
     rows = rows,
   )
+}
+
+private fun JSONObject.toPlainMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->
+  get(key).toPlainValue()
+}
+
+private fun Any?.toPlainValue(): Any? = when (this) {
+  JSONObject.NULL -> null
+  is JSONObject -> toPlainMap()
+  is JSONArray -> (0 until length()).map { get(it).toPlainValue() }
+  else -> this
 }
 
 private fun Any?.toOpenCartRow(): OpenCartRow? {
@@ -979,7 +1332,6 @@ private fun DataSnapshot.stringValue(vararg keys: String): String? {
   keys.forEach { key ->
     val snapshot = child(key)
     if (!snapshot.exists()) return@forEach
-    snapshot.getValue(String::class.java)?.takeIf { it.isNotBlank() }?.let { return it }
     snapshot.value?.toString()?.takeIf { it.isNotBlank() && it != "null" }?.let { return it }
   }
   return null
@@ -989,27 +1341,49 @@ private fun DataSnapshot.booleanValue(vararg keys: String): Boolean? {
   keys.forEach { key ->
     val snapshot = child(key)
     if (!snapshot.exists()) return@forEach
-    snapshot.getValue(Boolean::class.java)?.let { return it }
-    snapshot.getValue(Long::class.java)?.let { return it != 0L }
-    snapshot.value?.toString()?.let { raw ->
-      when {
-        raw.equals("true", ignoreCase = true) || raw == "1" || raw.equals("yes", ignoreCase = true) -> return true
-        raw.equals("false", ignoreCase = true) || raw == "0" || raw.equals("no", ignoreCase = true) -> return false
-      }
-    }
+    parseRemoteBoolean(snapshot.value)?.let { return it }
   }
   return null
+}
+
+internal fun parseRemoteBoolean(value: Any?): Boolean? = when (value) {
+  is Boolean -> value
+  is Number -> value.toLong() != 0L
+  is String -> when (value.trim().lowercase(Locale.US)) {
+    "true", "1", "yes" -> true
+    "false", "0", "no" -> false
+    else -> null
+  }
+  else -> null
 }
 
 private fun DataSnapshot.intValue(vararg keys: String): Int {
   keys.forEach { key ->
     val snapshot = child(key)
     if (!snapshot.exists()) return@forEach
-    snapshot.getValue(Int::class.java)?.let { return it }
-    snapshot.getValue(Long::class.java)?.toInt()?.let { return it }
+    (snapshot.value as? Number)?.let { return it.toInt() }
     snapshot.value?.toString()?.toIntOrNull()?.let { return it }
   }
   return 0
+}
+
+private fun DataSnapshot.childrenList(key: String): List<Any?> {
+  val snapshot = child(key)
+  if (!snapshot.exists()) return emptyList()
+  return when (val value = snapshot.value) {
+    is List<*> -> value
+    is Map<*, *> -> value.values.toList()
+    else -> emptyList()
+  }
+}
+
+private fun Throwable.isIgnorableFirestoreError(): Boolean {
+  val rawMessage = message.orEmpty()
+  return rawMessage.contains("PERMISSION_DENIED", ignoreCase = true) ||
+    rawMessage.contains("UNAVAILABLE", ignoreCase = true) ||
+    rawMessage.contains("Failed to get document", ignoreCase = true) ||
+    rawMessage.contains("network error", ignoreCase = true) ||
+    rawMessage.contains("Missing or insufficient permissions", ignoreCase = true)
 }
 
 private fun resolvePreviewImageBase64(

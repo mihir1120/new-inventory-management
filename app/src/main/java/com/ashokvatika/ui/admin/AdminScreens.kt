@@ -554,7 +554,6 @@ fun AdminHomeScreen(
           ),
         )
       }
-
       if (pendingAccessRequests.isNotEmpty()) {
         Spacer(modifier = Modifier.height(18.dp))
         PendingAccessApprovalCard(

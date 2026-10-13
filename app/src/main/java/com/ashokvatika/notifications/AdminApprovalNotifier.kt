@@ -17,6 +17,9 @@ import com.ashokvatika.app.R
 
 private const val ApprovalChannelId = "approval_requests"
 private const val ApprovalChannelName = "Approval Requests"
+internal const val ApprovalActionRequestId = "approval_request_id"
+internal const val ApprovalActionApprove = "com.ashokvatika.notifications.APPROVE_ACCESS_REQUEST"
+internal const val ApprovalActionDeny = "com.ashokvatika.notifications.DENY_ACCESS_REQUEST"
 
 object AdminApprovalNotifier {
   fun ensureChannel(context: Context) {
@@ -52,6 +55,18 @@ object AdminApprovalNotifier {
       intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+    val approveIntent = PendingIntent.getBroadcast(
+      context,
+      "${requestId}:approve".hashCode(),
+      approvalActionIntent(context, requestId, ApprovalActionApprove),
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val denyIntent = PendingIntent.getBroadcast(
+      context,
+      "${requestId}:deny".hashCode(),
+      approvalActionIntent(context, requestId, ApprovalActionDeny),
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     val notificationText = if (customerPhone.isBlank()) {
       customerName
@@ -63,13 +78,34 @@ object AdminApprovalNotifier {
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentTitle("Incoming customer call")
       .setContentText(notificationText)
+      .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setAutoCancel(true)
       .setContentIntent(pendingIntent)
+      .addAction(NotificationCompat.Action.Builder(0, "Deny", denyIntent).setAuthenticationRequired(true).build())
+      .addAction(NotificationCompat.Action.Builder(0, "Accept", approveIntent).setAuthenticationRequired(true).build())
       .build()
 
     NotificationManagerCompat.from(context).notify(requestId.hashCode(), notification)
+  }
+
+  fun cancelIncomingApproval(
+    context: Context,
+    requestId: String,
+  ) {
+    NotificationManagerCompat.from(context).cancel(requestId.hashCode())
+  }
+
+  private fun approvalActionIntent(
+    context: Context,
+    requestId: String,
+    action: String,
+  ): Intent {
+    return Intent(context, AdminApprovalActionReceiver::class.java).apply {
+      this.action = action
+      putExtra(ApprovalActionRequestId, requestId)
+    }
   }
 
   private fun canPostNotifications(context: Context): Boolean {

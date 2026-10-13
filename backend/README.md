@@ -54,4 +54,4 @@ POST /api/v1/products
 
 ## Important Next Step
 
-`X-Tenant-Id` is acceptable for early local development, but production should derive tenant access from the authenticated JWT claims or a server-side user membership lookup. Do not let users freely choose a tenant header in the final production app.
+Production requests must carry a trusted JWT with a `tenant_id` string claim matching `X-Tenant-Id`. Requests with a missing or different claim are rejected. Provision this claim through the identity provider, never from a user-editable profile field. The local profile still accepts the header for development and binds the API to localhost.

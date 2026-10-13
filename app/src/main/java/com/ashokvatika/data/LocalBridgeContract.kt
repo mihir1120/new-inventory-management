@@ -1,9 +1,10 @@
 package com.ashokvatika.data
 
 import android.net.Uri
+import com.ashokvatika.app.BuildConfig
 
 object LocalBridgeContract {
-  const val Authority = "com.ashokvatika.app.bridge"
+  val Authority = BuildConfig.LOCAL_BRIDGE_AUTHORITY
   private val BaseUri: Uri = Uri.parse("content://$Authority")
 
   object Inventory {

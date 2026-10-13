@@ -9,13 +9,15 @@ android {
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.ashokvatika.app"
+    applicationId = "com.ashokvatika.admin"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     manifestPlaceholders["usesCleartextTraffic"] = "false"
+    manifestPlaceholders["localBridgeAuthority"] = "${applicationId}.bridge"
+    buildConfigField("String", "LOCAL_BRIDGE_AUTHORITY", "\"${applicationId}.bridge\"")
   }
 
   buildTypes {

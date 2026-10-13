@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.ashokvatika.domain.model.AdminAccessRequest
 import com.ashokvatika.data.AdminAuthStore
 import com.ashokvatika.data.AdminFirestoreRepository
+import com.ashokvatika.data.LocalBridgeObservation
 import com.ashokvatika.domain.model.LiveCartPlant
 import com.ashokvatika.domain.model.LiveCustomerSession
 import com.ashokvatika.domain.model.CartProductItem
@@ -97,8 +98,9 @@ private enum class Route {
 fun AppRoot() {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
-  val auth = remember { FirebaseAuth.getInstance() }
+  val auth = remember { FirebaseAuth.getInstance().apply { signOut() } }
   val authStore = remember(context) { AdminAuthStore(context.applicationContext) }
+  authStore.clearObsoleteFirebaseSessionOnce()
   val firestoreRepository = remember(context) { AdminFirestoreRepository(context.applicationContext) }
   val isProvisioned = authStore.isProvisioned()
   val hasPersistedSession = authStore.hasActiveSession()
@@ -122,13 +124,13 @@ fun AppRoot() {
   val remoteLiveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
   var liveSyncMessage by remember { mutableStateOf<String?>(null) }
   val openCartRows = remember { mutableStateListOf<OpenCartRow>() }
-  val savedDeals = remember { mutableStateListOf<SavedDeal>() }
+  val savedDeals = remember { mutableStateListOf<SavedDeal>().apply { addAll(firestoreRepository.loadSavedDealsLocally()) } }
   var cartRowCounter by remember { mutableIntStateOf(1) }
-  var savedDealCounter by remember { mutableIntStateOf(InvoiceNumberStart) }
+  var savedDealCounter by remember { mutableIntStateOf(nextInvoiceCounter(savedDeals)) }
   var clientName by remember { mutableStateOf("") }
   var clientPhone by remember { mutableStateOf("") }
   var clientId by remember { mutableStateOf("") }
-  var transactionCode by remember { mutableStateOf(generateTransactionCode(InvoiceNumberStart)) }
+  var transactionCode by remember { mutableStateOf(generateTransactionCode(savedDealCounter)) }
   var syncedCartSessionId by remember { mutableStateOf<String?>(null) }
   var lastNotifiedRequestId by rememberSaveable { mutableStateOf<String?>(null) }
   val hasFirebaseSession = auth.currentUser != null
@@ -215,6 +217,11 @@ fun AppRoot() {
   LaunchedEffect(hasFirebaseSession) {
     if (hasFirebaseSession) {
       authStore.setActiveSession(true)
+      firestoreRepository.loadSavedDealsLocally(pendingOnly = true).forEach { deal ->
+        runCatching { firestoreRepository.upsertSavedDeal(deal) }.onFailure {
+          adminSyncMessage = "Saved deal is on this device; cloud sync failed: ${it.message}"
+        }
+      }
     }
   }
 
@@ -231,20 +238,12 @@ fun AppRoot() {
     lastNotifiedRequestId = incomingRequest.requestId
   }
 
-LaunchedEffect(currentInventorySnapshot) {
-    runCatching {
-      firestoreRepository.publishInventorySnapshotLocally(currentInventorySnapshot)
-    }.onFailure { error ->
-      adminSyncMessage = "Inventory bridge sync error: ${error.message ?: "Unable to publish local inventory."}"
-    }
-  }
-
   LaunchedEffect(liveCustomerSessions.toList(), currentInventorySnapshot) {
     syncLiveSessionsToOpenCart()
   }
 
   if (route != Route.Landing) {
-    DisposableEffect(firestoreRepository) {
+    DisposableEffect(firestoreRepository, hasFirebaseSession) {
       val inventoryBridgeRegistration = firestoreRepository.observeBridgeInventory(
         onUpdate = { cachedItems ->
           val grouped = cachedItems.groupBy { item -> item.category }
@@ -267,42 +266,51 @@ LaunchedEffect(currentInventorySnapshot) {
           adminSyncMessage = "Approval bridge error: ${error.message ?: "Unable to read local customer requests."}"
         },
       )
-      val inventoryRegistration = firestoreRepository.observeInventory(
-        onUpdate = {
-          adminSyncMessage = null
-        },
-        onError = { error ->
-          adminSyncMessage = "Inventory sync error: ${error.message ?: "Unable to connect to Firebase."}"
-        },
-      )
-      val requestsRegistration = firestoreRepository.observePendingAccessRequests(
-        onUpdate = { requests ->
-          adminSyncMessage = null
-          remotePendingAccessRequests.clear()
-          remotePendingAccessRequests.addAll(requests)
-          refreshPendingAccessRequests()
-        },
-        onError = { error ->
-          adminSyncMessage = error.message?.takeUnless { message -> message.contains("Permission denied", ignoreCase = true) }?.let { message -> "Approval sync error: $message" }
-        },
-      )
-      val savedDealsRegistration = firestoreRepository.observeSavedDeals(
-        onUpdate = { deals ->
-          adminSyncMessage = null
-          savedDeals.clear()
-          savedDeals.addAll(deals)
-          val nextCounter = nextInvoiceCounter(deals)
-          if (nextCounter > savedDealCounter) {
-            savedDealCounter = nextCounter
-            if (openCartRows.isEmpty()) {
-              transactionCode = generateTransactionCode(nextCounter)
+      val remoteRegistrations = mutableListOf<LocalBridgeObservation>()
+      if (hasFirebaseSession) {
+        remoteRegistrations.add(firestoreRepository.observeInventory(
+          onUpdate = {
+            adminSyncMessage = null
+          },
+          onError = { error ->
+            adminSyncMessage = "Inventory sync error: ${error.message ?: "Unable to connect to Firebase."}"
+          },
+        ))
+        remoteRegistrations.add(firestoreRepository.observePendingAccessRequests(
+          onUpdate = { requests ->
+            adminSyncMessage = null
+            remotePendingAccessRequests.clear()
+            remotePendingAccessRequests.addAll(requests)
+            refreshPendingAccessRequests()
+          },
+          onError = { error ->
+            adminSyncMessage = "Approval sync error: ${error.message ?: "Firebase access failed."}"
+          },
+        ))
+        remoteRegistrations.add(firestoreRepository.observeSavedDeals(
+          onUpdate = { deals ->
+            adminSyncMessage = null
+            savedDeals.clear()
+            savedDeals.addAll(deals)
+            val nextCounter = nextInvoiceCounter(deals)
+            if (nextCounter > savedDealCounter) {
+              savedDealCounter = nextCounter
+              if (openCartRows.isEmpty()) {
+                transactionCode = generateTransactionCode(nextCounter)
+              }
             }
-          }
-        },
-        onError = { error ->
-          adminSyncMessage = "OTC sync error: ${error.message ?: "Unable to connect to Firebase."}"
-        },
-      )
+          },
+          onError = { error ->
+            adminSyncMessage = "OTC sync error: ${error.message ?: "Unable to connect to Firebase."}"
+          },
+        ))
+      } else {
+        remotePendingAccessRequests.clear()
+        remoteLiveCustomerSessions.clear()
+        refreshPendingAccessRequests()
+        refreshLiveCustomerSessions()
+        adminSyncMessage = null
+      }
       val liveBridgeRegistration = firestoreRepository.observeBridgeLiveCustomerSessions(
         onUpdate = { sessions ->
           liveSyncMessage = null
@@ -314,25 +322,24 @@ LaunchedEffect(currentInventorySnapshot) {
           liveSyncMessage = "Live sync error: ${error.message ?: "Unable to load customer sessions."}"
         },
       )
-      val liveRemoteRegistration = firestoreRepository.observeLiveCustomerSessions(
-        onUpdate = { sessions ->
-          liveSyncMessage = null
-          remoteLiveCustomerSessions.clear()
-          remoteLiveCustomerSessions.addAll(sessions)
-          refreshLiveCustomerSessions()
-        },
-        onError = { error ->
-          liveSyncMessage = error.message?.takeUnless { message -> message.contains("Permission denied", ignoreCase = true) }?.let { message -> "Live sync error: $message" }
-        },
-      )
+      if (hasFirebaseSession) {
+        remoteRegistrations.add(firestoreRepository.observeLiveCustomerSessions(
+          onUpdate = { sessions ->
+            liveSyncMessage = null
+            remoteLiveCustomerSessions.clear()
+            remoteLiveCustomerSessions.addAll(sessions)
+            refreshLiveCustomerSessions()
+          },
+          onError = { error ->
+            liveSyncMessage = "Live sync error: ${error.message ?: "Firebase access failed."}"
+          },
+        ))
+      }
 
       onDispose {
         inventoryBridgeRegistration.remove()
         requestsBridgeRegistration.remove()
-        inventoryRegistration.remove()
-        requestsRegistration.remove()
-        savedDealsRegistration.remove()
-        liveRemoteRegistration.remove()
+        remoteRegistrations.forEach { registration -> registration.remove() }
         liveBridgeRegistration.remove()
       }
     }
@@ -340,7 +347,11 @@ LaunchedEffect(currentInventorySnapshot) {
 
   val handleRequestDecision: (String, Boolean) -> Unit = { requestId, approved ->
     scope.launch {
-      firestoreRepository.updateAccessRequestStatus(requestId, approved = approved)
+      runCatching {
+        firestoreRepository.updateAccessRequestStatus(requestId, approved = approved)
+      }.onFailure { error ->
+        adminSyncMessage = "Approval could not be saved: ${error.message}"
+      }
     }
   }
 
@@ -566,7 +577,8 @@ LaunchedEffect(currentInventorySnapshot) {
           }
         },
         onSaveDeal = { deal ->
-          if (deal.rows.isNotEmpty()) {
+          if (deal.rows.isNotEmpty() && runCatching { firestoreRepository.cacheSavedDeal(deal) }
+              .onFailure { adminSyncMessage = "Deal could not be saved on this device: ${it.message}" }.isSuccess) {
             savedDeals.add(0, deal)
             if (hasFirebaseSession) {
               scope.launch {
@@ -579,6 +591,7 @@ LaunchedEffect(currentInventorySnapshot) {
                 }
               }
             }
+            if (!hasFirebaseSession) adminSyncMessage = "Deal saved on this device. Firebase sign-in is required for cloud sync."
             savedDealCounter += 1
             openCartRows.clear()
             clientName = ""
@@ -602,12 +615,24 @@ LaunchedEffect(currentInventorySnapshot) {
         onUpdateDealInfo = { dealId, name, phone, savedClientId, savedTransactionCode ->
           val index = savedDeals.indexOfFirst { it.id == dealId }
           if (index >= 0) {
-            savedDeals[index] = savedDeals[index].copy(
+            val updatedDeal = savedDeals[index].copy(
               clientName = name,
               clientPhone = phone.filter(Char::isDigit),
               clientId = savedClientId,
               transactionCode = savedTransactionCode.uppercase(Locale.US),
             )
+            runCatching { firestoreRepository.cacheSavedDeal(updatedDeal) }.onSuccess {
+              savedDeals[index] = updatedDeal
+              if (hasFirebaseSession) {
+                scope.launch {
+                  runCatching { firestoreRepository.upsertSavedDeal(updatedDeal) }.onFailure {
+                    adminSyncMessage = "Deal saved on this device; cloud update failed: ${it.message}"
+                  }
+                }
+              } else {
+                adminSyncMessage = "Deal saved on this device. Firebase sign-in is required for cloud sync."
+              }
+            }.onFailure { adminSyncMessage = "Deal update could not be saved: ${it.message}" }
           }
         },
       )

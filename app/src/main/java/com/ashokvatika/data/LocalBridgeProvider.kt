@@ -1,6 +1,8 @@
 package com.ashokvatika.data
 
 import android.content.ContentProvider
+import android.content.ContentProviderOperation
+import android.content.ContentProviderResult
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.UriMatcher
@@ -15,6 +17,18 @@ class LocalBridgeProvider : ContentProvider() {
     val appContext = context?.applicationContext ?: return false
     databaseHelper = LocalBridgeDatabaseHelper(appContext)
     return true
+  }
+
+  override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+    val database = databaseHelper.writableDatabase
+    database.beginTransaction()
+    try {
+      val results = super.applyBatch(operations)
+      database.setTransactionSuccessful()
+      return results
+    } finally {
+      database.endTransaction()
+    }
   }
 
   override fun query(
@@ -63,7 +77,9 @@ class LocalBridgeProvider : ContentProvider() {
       ?: throw IllegalArgumentException("Missing primary key for $uri")
     safeValues.put(keyColumn, itemId)
 
-    database.insertWithOnConflict(table, null, safeValues, SQLiteDatabase.CONFLICT_REPLACE)
+    check(database.insertWithOnConflict(table, null, safeValues, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+      "Unable to save record in $table"
+    }
     val itemUri = directoryUri.buildUpon().appendPath(itemId).build()
     notifyChange(directoryUri, itemUri)
     return itemUri

@@ -26,6 +26,14 @@ class AdminAuthStore(
     }
   }
 
+  fun clearObsoleteFirebaseSessionOnce() {
+    if (prefs.getBoolean(KEY_FIREBASE_SESSION_CLEARED, false)) return
+    prefs.edit {
+      remove(KEY_SESSION_ACTIVE)
+      putBoolean(KEY_FIREBASE_SESSION_CLEARED, true)
+    }
+  }
+
   fun verifyPin(pin: String): Boolean {
     if (pin == DEFAULT_PIN) return true
     val stored = prefs.getString(KEY_PIN_HASH, null) ?: return false
@@ -66,5 +74,6 @@ class AdminAuthStore(
     private const val DEFAULT_PIN = DefaultAdminPin
     private const val KEY_PIN_HASH = "pin_hash"
     private const val KEY_SESSION_ACTIVE = "session_active"
+    private const val KEY_FIREBASE_SESSION_CLEARED = "firebase_session_cleared"
   }
 }

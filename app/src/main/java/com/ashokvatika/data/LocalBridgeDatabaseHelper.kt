@@ -29,6 +29,7 @@ class LocalBridgeDatabaseHelper(
 
   override fun onOpen(db: SQLiteDatabase) {
     super.onOpen(db)
+    db.execSQL("CREATE TABLE IF NOT EXISTS saved_deals_local (id TEXT PRIMARY KEY, payload TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 1)")
     ensureAccessRequestTable(db)
     ensureLiveSessionsTable(db)
     ensureInventoryColumns(db)

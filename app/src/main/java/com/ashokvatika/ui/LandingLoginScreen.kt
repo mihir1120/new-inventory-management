@@ -313,6 +313,9 @@ fun LandingLoginScreen(
               fontSize = 14.sp,
             ),
           )
+
+          if (isProvisioned) {
+          }
         }
 
         if (message != null) {

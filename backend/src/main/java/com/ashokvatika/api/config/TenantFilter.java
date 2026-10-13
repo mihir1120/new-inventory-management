@@ -8,11 +8,20 @@ import java.io.IOException;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
 public class TenantFilter extends OncePerRequestFilter {
     private static final String TENANT_HEADER = "X-Tenant-Id";
+    private final Environment environment;
+
+    public TenantFilter(Environment environment) {
+        this.environment = environment;
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -34,7 +43,17 @@ public class TenantFilter extends OncePerRequestFilter {
         }
 
         try {
-            TenantContext.setTenantId(UUID.fromString(tenantId));
+            UUID requestedTenant = UUID.fromString(tenantId);
+            if (!environment.acceptsProfiles(Profiles.of("local"))) {
+                var authentication = SecurityContextHolder.getContext().getAuthentication();
+                if (!(authentication instanceof JwtAuthenticationToken jwt)
+                        || !jwt.isAuthenticated()
+                        || !requestedTenant.toString().equals(jwt.getToken().getClaimAsString("tenant_id"))) {
+                    response.sendError(HttpStatus.FORBIDDEN.value(), "Tenant access denied");
+                    return;
+                }
+            }
+            TenantContext.setTenantId(requestedTenant);
             filterChain.doFilter(request, response);
         } catch (IllegalArgumentException exception) {
             response.sendError(HttpStatus.BAD_REQUEST.value(), "Invalid X-Tenant-Id header");

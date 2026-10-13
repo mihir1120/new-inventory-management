@@ -6,7 +6,7 @@
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <application
-    android:allowBackup="false"
+    android:allowBackup="true"
     android:dataExtractionRules="@xml/data_extraction_rules"
     android:fullBackupContent="@xml/backup_rules"
     android:icon="@mipmap/ic_launcher"
@@ -26,9 +26,12 @@
     </provider>
     <provider
       android:name="com.ashokvatika.data.LocalBridgeProvider"
-      android:authorities="com.ashokvatika.app.bridge"
+      android:authorities="${localBridgeAuthority}"
       android:exported="false"
       android:grantUriPermissions="true" />
+    <receiver
+      android:name="com.ashokvatika.notifications.AdminApprovalActionReceiver"
+      android:exported="false" />
     <activity
       android:name="com.ashokvatika.MainActivity"
       android:exported="true">
