@@ -1,0 +1,34 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: ashokvatika-api
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ashokvatika}
+    username: ${DATABASE_USERNAME:ashokvatika}
+    password: ${DATABASE_PASSWORD:ashokvatika}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8081/realms/ashokvatika}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

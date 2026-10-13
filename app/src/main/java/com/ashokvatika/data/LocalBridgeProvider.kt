@@ -1,6 +1,8 @@
 package com.ashokvatika.data
 
 import android.content.ContentProvider
+import android.content.ContentProviderOperation
+import android.content.ContentProviderResult
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.UriMatcher
@@ -15,6 +17,18 @@ class LocalBridgeProvider : ContentProvider() {
     val appContext = context?.applicationContext ?: return false
     databaseHelper = LocalBridgeDatabaseHelper(appContext)
     return true
+  }
+
+  override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+    val database = databaseHelper.writableDatabase
+    database.beginTransaction()
+    try {
+      val results = super.applyBatch(operations)
+      database.setTransactionSuccessful()
+      return results
+    } finally {
+      database.endTransaction()
+    }
   }
 
   override fun query(
@@ -45,6 +59,8 @@ class LocalBridgeProvider : ContentProvider() {
       InventoryItem -> "vnd.android.cursor.item/${LocalBridgeContract.Authority}.${LocalBridgeContract.Inventory.Table}"
       AccessDir -> "vnd.android.cursor.dir/${LocalBridgeContract.Authority}.${LocalBridgeContract.AccessRequests.Table}"
       AccessItem -> "vnd.android.cursor.item/${LocalBridgeContract.Authority}.${LocalBridgeContract.AccessRequests.Table}"
+      LiveSessionsDir -> "vnd.android.cursor.dir/${LocalBridgeContract.Authority}.${LocalBridgeContract.LiveSessions.Table}"
+      LiveSessionsItem -> "vnd.android.cursor.item/${LocalBridgeContract.Authority}.${LocalBridgeContract.LiveSessions.Table}"
       else -> throw IllegalArgumentException("Unsupported uri: $uri")
     }
   }
@@ -61,7 +77,9 @@ class LocalBridgeProvider : ContentProvider() {
       ?: throw IllegalArgumentException("Missing primary key for $uri")
     safeValues.put(keyColumn, itemId)
 
-    database.insertWithOnConflict(table, null, safeValues, SQLiteDatabase.CONFLICT_REPLACE)
+    check(database.insertWithOnConflict(table, null, safeValues, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+      "Unable to save record in $table"
+    }
     val itemUri = directoryUri.buildUpon().appendPath(itemId).build()
     notifyChange(directoryUri, itemUri)
     return itemUri
@@ -144,6 +162,22 @@ class LocalBridgeProvider : ContentProvider() {
         defaultSortOrder = null,
       )
 
+      LiveSessionsDir -> QueryTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        selection = selection,
+        selectionArgs = selectionArgs,
+        notifyUri = LocalBridgeContract.LiveSessions.ContentUri,
+        defaultSortOrder = "${LocalBridgeContract.LiveSessions.UpdatedAt} DESC",
+      )
+
+      LiveSessionsItem -> QueryTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        selection = "${LocalBridgeContract.LiveSessions.SessionId} = ?",
+        selectionArgs = arrayOf(requireLastPathSegment(uri)),
+        notifyUri = uri,
+        defaultSortOrder = null,
+      )
+
       else -> throw IllegalArgumentException("Unsupported uri: $uri")
     }
   }
@@ -178,6 +212,20 @@ class LocalBridgeProvider : ContentProvider() {
         directoryUri = LocalBridgeContract.AccessRequests.ContentUri,
       )
 
+      LiveSessionsDir -> InsertTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        itemKey = null,
+        keyColumn = LocalBridgeContract.LiveSessions.SessionId,
+        directoryUri = LocalBridgeContract.LiveSessions.ContentUri,
+      )
+
+      LiveSessionsItem -> InsertTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        itemKey = requireLastPathSegment(uri),
+        keyColumn = LocalBridgeContract.LiveSessions.SessionId,
+        directoryUri = LocalBridgeContract.LiveSessions.ContentUri,
+      )
+
       else -> throw IllegalArgumentException("Unsupported uri: $uri")
     }
   }
@@ -210,6 +258,20 @@ class LocalBridgeProvider : ContentProvider() {
         keyColumn = LocalBridgeContract.AccessRequests.RequestId,
         itemId = requireLastPathSegment(uri),
         directoryUri = LocalBridgeContract.AccessRequests.ContentUri,
+      )
+
+      LiveSessionsDir -> UpdateTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        keyColumn = LocalBridgeContract.LiveSessions.SessionId,
+        itemId = null,
+        directoryUri = LocalBridgeContract.LiveSessions.ContentUri,
+      )
+
+      LiveSessionsItem -> UpdateTarget(
+        table = LocalBridgeContract.LiveSessions.Table,
+        keyColumn = LocalBridgeContract.LiveSessions.SessionId,
+        itemId = requireLastPathSegment(uri),
+        directoryUri = LocalBridgeContract.LiveSessions.ContentUri,
       )
 
       else -> throw IllegalArgumentException("Unsupported uri: $uri")
@@ -256,12 +318,16 @@ class LocalBridgeProvider : ContentProvider() {
     const val InventoryItem = 101
     const val AccessDir = 200
     const val AccessItem = 201
+    const val LiveSessionsDir = 300
+    const val LiveSessionsItem = 301
 
     val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
       addURI(LocalBridgeContract.Authority, LocalBridgeContract.Inventory.Table, InventoryDir)
       addURI(LocalBridgeContract.Authority, "${LocalBridgeContract.Inventory.Table}/*", InventoryItem)
       addURI(LocalBridgeContract.Authority, LocalBridgeContract.AccessRequests.Table, AccessDir)
       addURI(LocalBridgeContract.Authority, "${LocalBridgeContract.AccessRequests.Table}/*", AccessItem)
+      addURI(LocalBridgeContract.Authority, LocalBridgeContract.LiveSessions.Table, LiveSessionsDir)
+      addURI(LocalBridgeContract.Authority, "${LocalBridgeContract.LiveSessions.Table}/*", LiveSessionsItem)
     }
   }
 }

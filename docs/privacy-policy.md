@@ -11,11 +11,21 @@ This Privacy Policy explains how Ashokvatika ("we," "our," or "us") collects, us
 
 This Privacy Policy applies to the Ashokvatika Android application and related services made available through the App.
 
+## 1A. Target Audience and Age Group
+
+Ashokvatika is intended for users in the following age groups selected in Google Play Console:
+
+- **Ages 13-15**
+- **Ages 16-17**
+- **Ages 18 and above**
+
+The App is **not directed to children under 13**. If you are under the age of digital consent in your country or region, you should use the App only with the involvement, consent, or supervision of a parent or legal guardian where required by applicable law.
+
 ## 2. Information We Access or Collect
 
 Depending on how the App is used, we may access or collect the following categories of information:
 
-- **App account and sign-in information:** limited administrator login inputs used to access protected areas of the App.
+- **App account and sign-in information:** limited administrator login inputs and first-launch administrator credential provisioning data used to access protected areas of the App.
 - **Inventory and business content:** product names, descriptions, stock details, pricing, media references, and related business records entered into the App.
 - **Customer and transaction details:** customer names, phone numbers, customer IDs, transaction codes, and saved deal information entered by authorized users.
 - **Access request records:** customer approval or access request details managed within the App.
@@ -50,7 +60,7 @@ We may share or process data in the following limited ways:
 We use reasonable administrative, technical, and organizational safeguards designed to protect data handled by the App. These measures include:
 
 - use of HTTPS/TLS-backed Google services where applicable;
-- restricted in-app admin access flow;
+- restricted in-app admin access flow with first-launch credential provisioning;
 - disabled Android backup for app data in release builds;
 - disabled cleartext traffic in release configuration;
 - release-build code shrinking and security-focused configuration.
@@ -86,9 +96,11 @@ The App may request or use access to:
 
 The App is intended to access only the media or files needed for the user-facing functionality selected by the user.
 
-## 9. Children
+## 9. Children and Teen Users
 
-The App is intended for business and operational use and is not directed to children.
+The App is not directed to children under 13.
+
+For users aged 13-17, the App is intended to be used in an age-appropriate manner and, where required by local law, with parental or guardian awareness, consent, or supervision. We do not knowingly design the App to collect personal information from children under 13.
 
 ## 10. Third-Party Services
 
@@ -116,4 +128,5 @@ This Privacy Policy is intended to support Google Play disclosure requirements. 
 - the publisher/developer name in Google Play matches the entity named above;
 - the contact email is replaced with your real support/privacy contact;
 - this policy is hosted at a public, non-geofenced, non-editable web URL;
-- your Google Play Data safety form matches the actual behavior of the released app.
+- your Google Play Data safety form matches the actual behavior of the released app;
+- your Google Play target audience settings stay aligned with the audience described in this policy.

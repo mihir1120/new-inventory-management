@@ -13,9 +13,17 @@ The App is provided for business, inventory, catalog, media management, OTC work
 
 ## 2. Eligibility and Authorized Access
 
+The App is intended for users in the following Google Play target age groups:
+
+- **Ages 13-15**
+- **Ages 16-17**
+- **Ages 18 and above**
+
+The App is **not intended for children under 13**. If you are between 13 and 17 years old, you represent that you are using the App with any parental, guardian, school, or organizational authorization required under applicable law or policy.
+
 You are responsible for ensuring that only authorized users access protected parts of the App.
 
-At the current stage of deployment, the App may use a temporary administrator login flow for internal or controlled operations. You are responsible for keeping device access restricted while temporary credentials are in use.
+The App requires an administrator PIN to be provisioned on first launch for each fresh install. You are responsible for keeping that credential and the device itself restricted to authorized users.
 
 ## 3. Account and Credential Responsibility
 
@@ -127,4 +135,5 @@ Before publishing on Google Play, confirm that:
 
 - the legal/business name used in your store listing matches the entity named in these Terms;
 - the support email is replaced with your real customer/legal contact;
-- any links presented in-app or in Play Console point to the final hosted versions of these Terms and the Privacy Policy.
+- any links presented in-app or in Play Console point to the final hosted versions of these Terms and the Privacy Policy;
+- the target audience declared in Google Play Console matches the age-group language used in these Terms.

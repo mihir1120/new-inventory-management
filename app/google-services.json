@@ -1,21 +1,22 @@
 {
   "project_info": {
-    "project_number": "326819486805",
-    "project_id": "new-ashokvatika-nursery",
-    "storage_bucket": "new-ashokvatika-nursery.firebasestorage.app"
+    "project_number": "263131299486",
+    "firebase_url": "https://ashokvatika-live-55838-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "ashokvatika-live-55838",
+    "storage_bucket": "ashokvatika-live-55838.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:326819486805:android:5f00c693e95dfbaa9248dc",
+        "mobilesdk_app_id": "1:263131299486:android:d4a848cead876657e7458f",
         "android_client_info": {
-          "package_name": "com.ashokvatika.app"
+          "package_name": "com.ashokvatika.admin"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBYCpdvLkblqML8V-trF6GNS1uOsnvz1Jg"
+          "current_key": "AIzaSyDePqy-ky4T6qb-L2WblKnBSWRg0xGu1kM"
         }
       ],
       "services": {

@@ -18,8 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,15 +35,15 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import com.ashokvatika.app.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -57,53 +57,104 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ashokvatika.app.R
+import com.ashokvatika.data.AdminAuthStore
+import com.ashokvatika.security.LoginRateLimiter
 import com.ashokvatika.ui.components.AshokvatikaLogo
-import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 private val Bg = Color(0xFFF7F7F7)
 private val Ink = Color(0xFF141414)
 private val Accent = Color(0xFFF17C32)
 private val LabelGreen = Color(0xFF57A46B)
 private val FieldFill = Color(0xFFEFF1F2)
+private const val AdminAlias = "admin"
 
 @Composable
 fun LandingLoginScreen(
   modifier: Modifier = Modifier,
   onLoggedIn: () -> Unit,
 ) {
+  val context = LocalContext.current
   val dmSans = rememberDmSans()
   val keyboard = LocalSoftwareKeyboardController.current
-  val auth = remember { FirebaseAuth.getInstance() }
   val scope = rememberCoroutineScope()
+  val authStore = remember(context) { AdminAuthStore(context.applicationContext) }
+  val rateLimiter = remember { LoginRateLimiter() }
+  val isProvisioned = authStore.isProvisioned()
 
-  var username by remember { mutableStateOf("admin") }
-  var password by remember { mutableStateOf("123") }
+  var username by remember { mutableStateOf("") }
+  var password by remember { mutableStateOf("") }
+  var confirmPassword by remember { mutableStateOf("") }
   var showUser by remember { mutableStateOf(true) }
   var showPass by remember { mutableStateOf(false) }
+  var showConfirmPass by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
+  var message by remember { mutableStateOf<String?>(null) }
   var isSubmitting by remember { mutableStateOf(false) }
 
   fun submit() {
     if (isSubmitting) return
-    if (username == "admin" && password == "123") {
+    if (!isProvisioned) {
+      val validationError = AdminAuthStore.validatePin(password)
+      when {
+        validationError != null -> {
+          error = validationError
+          message = null
+        }
+
+        password != confirmPassword -> {
+          error = "PIN confirmation does not match."
+          message = null
+        }
+
+        else -> {
+          authStore.setPin(password)
+          authStore.setActiveSession(true)
+          error = null
+          message = "Admin PIN created. Opening admin panel..."
+          keyboard?.hide()
+          isSubmitting = true
+          scope.launch {
+            onLoggedIn()
+            isSubmitting = false
+          }
+        }
+      }
+      return
+    }
+
+    val gate = rateLimiter.beforeAttempt()
+    if (!gate.allowed) {
+      error = "Too many attempts. Try again in ${gate.waitSeconds} seconds."
+      message = null
+      return
+    }
+    val loginId = username.trim()
+    if (loginId.isBlank() || password.isBlank()) {
+      error = "Enter your admin username and password."
+      message = null
+      return
+    }
+    if (loginId.equals(AdminAlias, ignoreCase = true) && authStore.verifyPin(password)) {
+      rateLimiter.recordSuccess()
+      authStore.setActiveSession(true)
       error = null
+      message = "Opening admin panel..."
       keyboard?.hide()
       isSubmitting = true
       scope.launch {
-        runCatching {
-          auth.signInAnonymously().await()
-        }.onSuccess {
-          isSubmitting = false
-          onLoggedIn()
-        }.onFailure { throwable ->
-          isSubmitting = false
-          onLoggedIn()
-        }
+        onLoggedIn()
+        isSubmitting = false
       }
     } else {
-      error = "Use username admin and password 123."
+      val failureGate = rateLimiter.recordFailure()
+      error = if (failureGate.allowed) {
+        "Incorrect admin credentials."
+      } else {
+        "Too many attempts. Try again in ${failureGate.waitSeconds} seconds."
+      }
+      message = null
     }
   }
 
@@ -160,7 +211,7 @@ fun LandingLoginScreen(
 
         AshokvatikaLogo(
           modifier = Modifier
-            .fillMaxWidth(0.6f)
+            .fillMaxWidth(0.5f)
             .padding(horizontal = 8.dp),
           textSize = brandTextSize,
           markSize = logoHeight * 0.54f,
@@ -174,42 +225,80 @@ fun LandingLoginScreen(
             .fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-          LoginField(
-            label = "User name",
-            labelImageRes = R.drawable.icon_username,
-            labelImageSize = 34.dp,
-            value = username,
-            onValueChange = {
-              username = it
-              error = null
-            },
-            showValue = showUser,
-            onToggleVisibility = { showUser = !showUser },
-            dmSans = dmSans,
-            keyboardType = KeyboardType.Text,
-            imeAction = ImeAction.Next,
-            enabled = !isSubmitting,
-          )
+          if (isProvisioned) {
+            LoginField(
+              label = "User name",
+              labelImageRes = R.drawable.icon_username,
+              labelImageSize = 34.dp,
+              value = username,
+              onValueChange = {
+                username = it
+                error = null
+                message = null
+              },
+              showValue = showUser,
+              onToggleVisibility = { showUser = !showUser },
+              dmSans = dmSans,
+              keyboardType = KeyboardType.Text,
+              imeAction = ImeAction.Next,
+              enabled = !isSubmitting,
+            )
+          } else {
+            Text(
+              text = "Create the administrator PIN before this device can open the Ashokvatika admin workspace. Use at least ${AdminAuthStore.MinPinLength} digits and avoid easy sequences.",
+              color = Ink.copy(alpha = 0.78f),
+              style = TextStyle(
+                fontFamily = dmSans,
+                fontWeight = FontWeight.Normal,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+              ),
+            )
+          }
 
           LoginField(
-            label = "Password",
+            label = if (isProvisioned) "Password" else "Create admin PIN",
             labelImageRes = R.drawable.icon_password,
             labelImageSize = 42.dp,
             value = password,
             onValueChange = {
               password = it
               error = null
+              message = null
             },
             showValue = showPass,
             onToggleVisibility = { showPass = !showPass },
             dmSans = dmSans,
             keyboardType = KeyboardType.NumberPassword,
-            imeAction = ImeAction.Done,
-            onDone = ::submit,
-            showConfirm = password.isNotBlank(),
+            imeAction = if (isProvisioned) ImeAction.Done else ImeAction.Next,
+            onDone = if (isProvisioned) ::submit else null,
+            showConfirm = isProvisioned && password.isNotBlank(),
             onConfirm = ::submit,
             enabled = !isSubmitting,
           )
+
+          if (!isProvisioned) {
+            LoginField(
+              label = "Confirm admin PIN",
+              labelImageRes = R.drawable.icon_password,
+              labelImageSize = 42.dp,
+              value = confirmPassword,
+              onValueChange = {
+                confirmPassword = it
+                error = null
+                message = null
+              },
+              showValue = showConfirmPass,
+              onToggleVisibility = { showConfirmPass = !showConfirmPass },
+              dmSans = dmSans,
+              keyboardType = KeyboardType.NumberPassword,
+              imeAction = ImeAction.Done,
+              onDone = ::submit,
+              showConfirm = confirmPassword.isNotBlank(),
+              onConfirm = ::submit,
+              enabled = !isSubmitting,
+            )
+          }
         }
 
         if (error != null) {
@@ -224,12 +313,15 @@ fun LandingLoginScreen(
               fontSize = 14.sp,
             ),
           )
+
+          if (isProvisioned) {
+          }
         }
 
-        if (isSubmitting) {
+        if (message != null) {
           Spacer(modifier = Modifier.height(12.dp))
           Text(
-            text = "Connecting to Firebase...",
+            text = message!!,
             color = LabelGreen,
             textAlign = TextAlign.Center,
             style = TextStyle(

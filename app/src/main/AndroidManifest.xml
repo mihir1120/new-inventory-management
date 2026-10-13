@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <application
-    android:allowBackup="false"
+    android:allowBackup="true"
     android:dataExtractionRules="@xml/data_extraction_rules"
     android:fullBackupContent="@xml/backup_rules"
-    android:icon="@drawable/ic_launcher"
+    android:icon="@mipmap/ic_launcher"
     android:label="@string/app_name"
-    android:usesCleartextTraffic="false"
+    android:roundIcon="@mipmap/ic_launcher_round"
+    android:usesCleartextTraffic="${usesCleartextTraffic}"
     android:supportsRtl="true"
     android:theme="@style/Theme.Ashokvatika">
     <provider
@@ -21,6 +24,14 @@
         android:name="android.support.FILE_PROVIDER_PATHS"
         android:resource="@xml/file_paths" />
     </provider>
+    <provider
+      android:name="com.ashokvatika.data.LocalBridgeProvider"
+      android:authorities="${localBridgeAuthority}"
+      android:exported="false"
+      android:grantUriPermissions="true" />
+    <receiver
+      android:name="com.ashokvatika.notifications.AdminApprovalActionReceiver"
+      android:exported="false" />
     <activity
       android:name="com.ashokvatika.MainActivity"
       android:exported="true">
@@ -29,9 +40,6 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
-    <activity
-      android:name="com.ashokvatika.ui.otc.StableOtcShellActivity"
-      android:exported="false" />
   </application>
 
 </manifest>

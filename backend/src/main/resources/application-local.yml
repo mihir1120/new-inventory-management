@@ -1,0 +1,24 @@
+server:
+  address: 127.0.0.1
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:ashokvatika;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8081/realms/ashokvatika
+
+logging:
+  level:
+    org.springframework.security: INFO

@@ -1,5 +1,6 @@
 <resources>
   <style name="Theme.Ashokvatika" parent="android:Theme.Material.Light.NoActionBar">
+    <item name="android:windowBackground">#E6E9EE</item>
     <item name="android:statusBarColor">#F7F7F7</item>
     <item name="android:navigationBarColor">#F7F7F7</item>
   </style>

@@ -1,9 +1,14 @@
 package com.ashokvatika
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.lightColorScheme
@@ -12,15 +17,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.lifecycleScope
 import com.ashokvatika.config.AppExperimentManager
 import com.ashokvatika.config.ReleaseRuntimeConfig
+import com.ashokvatika.notifications.AdminApprovalNotifier
 import com.ashokvatika.ui.AppRoot
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    AppExperimentManager.initialize(applicationContext)
+    AdminApprovalNotifier.ensureChannel(applicationContext)
+    requestNotificationPermissionIfNeeded()
+    runCatching {
+      AppExperimentManager.initialize(applicationContext)
+    }.onFailure { error ->
+      Log.w("AshokvatikaMain", "Experiment manager initialization skipped", error)
+    }
     lifecycleScope.launch {
-      AppExperimentManager.fetchAndActivate()
+      runCatching {
+        AppExperimentManager.fetchAndActivate()
+      }.onFailure { error ->
+        Log.w("AshokvatikaMain", "Experiment manager fetch skipped", error)
+      }
     }
     if (ReleaseRuntimeConfig.screenshotsProtected) {
       window.setFlags(
@@ -32,13 +48,26 @@ class MainActivity : ComponentActivity() {
       App()
     }
   }
+
+  private fun requestNotificationPermissionIfNeeded() {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+
+    ActivityCompat.requestPermissions(
+      this,
+      arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+      1001,
+    )
+  }
 }
 
 @Composable
 private fun App() {
   val scheme = lightColorScheme(
-    background = Color(0xFFF7F7F7),
-    surface = Color(0xFFF7F7F7),
+    primary = Color(0xFFE9782F),
+    secondary = Color(0xFF5E9655),
+    background = Color(0xFFF6F2EB),
+    surface = Color(0xFFFFFCF7),
     onBackground = Color(0xFF141414),
     onSurface = Color(0xFF141414),
   )

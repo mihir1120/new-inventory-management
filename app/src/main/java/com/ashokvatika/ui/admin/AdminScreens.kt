@@ -6,6 +6,8 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.util.LruCache
+import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -66,6 +69,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddToDrive
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -74,7 +78,12 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mail
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -88,6 +97,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
@@ -107,9 +117,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontStyle
@@ -123,11 +136,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.net.toUri
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Home
@@ -136,13 +153,21 @@ import androidx.compose.material.icons.filled.WbSunny
 import com.ashokvatika.app.R
 import com.ashokvatika.config.AppExperimentManager
 import com.ashokvatika.config.GalleryShareSheetVariant
-import com.ashokvatika.data.AdminAccessRequest
+import com.ashokvatika.domain.model.AdminAccessRequest
+import com.ashokvatika.domain.model.LiveCartPlant
+import com.ashokvatika.domain.model.LiveCustomerSession
 import com.ashokvatika.ui.components.AshokvatikaLogo
 import com.ashokvatika.ui.components.BrandButtonGlyph
 import com.ashokvatika.ui.components.BrandButtonIcon
 import com.ashokvatika.ui.components.BrandGreen
 import com.ashokvatika.ui.components.BrandOrange
 import com.ashokvatika.ui.components.NumericKeypad
+import com.ashokvatika.domain.model.CartProductItem
+import com.ashokvatika.domain.model.DashboardDestination
+import com.ashokvatika.domain.model.InventoryItem
+import com.ashokvatika.domain.model.OpenCartRow
+import com.ashokvatika.domain.model.SavedDeal
+import com.ashokvatika.domain.usecase.generateTransactionCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -152,13 +177,18 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 
-private val Bg = Color(0xFFF7F7F7)
+private val Bg = Color(0xFFF6F2EB)
 private val Accent = BrandOrange
 private val Ink = Color(0xFF141414)
 private val AccentGreen = BrandGreen
 private val TileShadow = Color(0x2C9EA4AA)
 private val SoftGreyShadow = Color(0x24969CA6)
+private val Panel = Color(0xFFFFFCF7)
+private val PanelTint = Color(0xFFF7EFE4)
+private val PanelBorder = Color(0xFFE8DDCF)
 private val CardShape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
 private val UploadPill = Color(0x26FFFFFF)
 private val OtcHeaderActionSize = 54.dp
@@ -172,6 +202,18 @@ private val OtcHeaderTopSpace = 8.dp
 private val OtcHeaderFrameHeight = 186.dp
 private val OtcHeaderLogoWidth = 320.dp
 private val OtcHeaderLogoHeight = 122.4.dp
+private val OtcPhoneHeaderHorizontalPadding = 12.dp
+private val OtcPhoneHeaderTopPadding = 6.dp
+private val OtcPhoneHeaderActionTopPadding = 4.dp
+private val OtcPhoneHeaderActionSize = 38.dp
+private val OtcPhoneHeaderIconSize = 16.dp
+private val OtcPhoneHeaderSpacing = 8.dp
+private val OtcPhoneHeaderLogoWidth = 184.dp
+private val OtcPhoneHeaderLogoHeight = 60.dp
+private val OtcPhoneHeaderLogoTextSize = 16.sp
+private val OtcPhoneHeaderLogoMarkSize = 29.33.dp
+private val OtcPhoneContentTopGap = 1.33.dp
+private val OtcPhoneStickyBlockTopOffset = 18.dp
 private val OtcHeaderTopOffset = OtcPageVerticalPadding + OtcHeaderTopSpace
 private val OtcMainContentTopPadding = OtcHeaderTopOffset + OtcHeaderFrameHeight + 10.dp
 private val OtcOpenCartContentTopPadding = OtcHeaderTopOffset + OtcHeaderFrameHeight + 12.dp
@@ -181,60 +223,215 @@ private val LockedHeaderActionSize = 42.dp
 private val LockedHeaderIconSize = 24.dp
 private val LockedHeaderActionSpacing = 10.dp
 
-enum class DashboardDestination(
+private fun isPhoneScreen(maxWidth: Dp): Boolean = maxWidth < 600.dp
+
+private fun isCompactPhoneScreen(maxWidth: Dp, maxHeight: Dp): Boolean =
+  isPhoneScreen(maxWidth) && (maxWidth < 430.dp || maxHeight < 900.dp)
+
+private data class DashboardTileItem(
+  val destination: DashboardDestination,
+  val icon: BrandButtonIcon? = null,
+  val delayMillis: Int,
+)
+
+private data class DocsMenuItem(
   val title: String,
-) {
-  OTC("OTC"),
-  Plants("Plants"),
-  Supplies("Supplies"),
-  Pots("Pots"),
+  val delayMillis: Int,
+  val baseColor: Color = Accent,
+)
+
+private data class MenuScreenLayoutSpec(
+  val contentWidth: Dp,
+  val tileGap: Dp,
+  val tileWidth: Dp,
+  val topSpacer: Dp,
+  val topPadding: Dp,
+  val brandTextSize: TextUnit,
+  val brandMarkSize: Dp,
+  val logoWidthFraction: Float,
+  val footerWidthFraction: Float,
+  val footerHeight: Dp,
+  val bottomSpacer: Dp,
+)
+
+private fun menuScreenLayoutSpec(
+  maxWidth: Dp,
+  maxHeight: Dp,
+): MenuScreenLayoutSpec {
+  val phoneScreen = isPhoneScreen(maxWidth)
+  val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+  val tabletScreen = maxWidth >= 700.dp
+  val contentWidth = when {
+    maxWidth >= 1000.dp -> 900.dp
+    tabletScreen -> 820.dp
+    else -> minOf(maxWidth, 720.dp)
+  }
+  val tileGap = when {
+    maxWidth >= 1000.dp -> 30.dp
+    tabletScreen -> 24.dp
+    compactScreen -> 10.dp
+    else -> 12.dp
+  }
+  val tileWidth = ((contentWidth - tileGap) / 2f).coerceAtMost(
+    when {
+      maxWidth >= 1000.dp -> 278.dp
+      tabletScreen -> 250.dp
+      compactScreen -> 188.dp
+      else -> 218.dp
+    },
+  )
+  val topSpacer = when {
+    maxWidth >= 1000.dp -> 68.dp
+    tabletScreen -> 60.dp
+    compactScreen -> 20.dp
+    maxHeight > 900.dp -> 52.dp
+    maxHeight > 700.dp -> 36.dp
+    else -> 24.dp
+  }
+  val topPadding = when {
+    maxWidth >= 1000.dp -> 54.dp
+    tabletScreen -> 46.dp
+    compactScreen -> 12.dp
+    maxHeight > 900.dp -> 42.dp
+    maxHeight > 700.dp -> 30.dp
+    else -> 18.dp
+  }
+  val brandTextSize = when {
+    maxWidth >= 1000.dp -> 86.sp
+    tabletScreen -> 75.sp
+    compactScreen -> 42.sp
+    phoneScreen -> 48.sp
+    else -> 57.sp
+  }
+  val brandMarkSize = when {
+    maxWidth >= 1000.dp -> 190.dp
+    tabletScreen -> 168.dp
+    compactScreen -> 92.dp
+    phoneScreen -> 104.dp
+    else -> 126.dp
+  }
+  val logoWidthFraction = when {
+    maxWidth >= 1000.dp -> 0.48f
+    tabletScreen -> 0.54f
+    compactScreen -> 0.72f
+    phoneScreen -> 0.64f
+    else -> 0.6f
+  }
+  val footerWidthFraction = when {
+    maxWidth >= 1000.dp -> 0.3f
+    tabletScreen -> 0.34f
+    compactScreen -> 0.44f
+    phoneScreen -> 0.4f
+    else -> 0.38f
+  }
+  val footerHeight = when {
+    maxWidth >= 1000.dp -> 128.dp
+    tabletScreen -> 116.dp
+    compactScreen -> 72.dp
+    else -> 96.dp
+  }
+  val bottomSpacer = if (compactScreen) 20.dp else 28.dp
+
+  return MenuScreenLayoutSpec(
+    contentWidth = contentWidth,
+    tileGap = tileGap,
+    tileWidth = tileWidth,
+    topSpacer = topSpacer,
+    topPadding = topPadding,
+    brandTextSize = brandTextSize,
+    brandMarkSize = brandMarkSize,
+    logoWidthFraction = logoWidthFraction,
+    footerWidthFraction = footerWidthFraction,
+    footerHeight = footerHeight,
+    bottomSpacer = bottomSpacer,
+  )
 }
 
-data class InventoryItem(
-  val id: String,
-  val category: DashboardDestination,
-  val name: String,
-  val batch: String,
-  val sale: String,
-  val rent: String,
-  val details: String,
-  val price: String,
-  val checkout: String,
-  val imageUri: String?,
-  val mediaUris: List<String> = emptyList(),
-  val status: String = "complete",
-  val templatePrimaryTitle: String = "",
-  val templatePrimaryDescription: String = "",
-  val templateSecondaryTitle: String = "",
-  val templateSecondaryDescription: String = "",
-  val templateContact: String = "",
+private data class MenuHeaderSpec(
+  val contentWidth: Dp,
+  val horizontalPadding: Dp,
+  val headerTopPadding: Dp,
+  val actionButtonSize: Dp,
+  val actionIconSize: Dp,
+  val actionSpacing: Dp,
+  val actionTopPadding: Dp,
 )
 
-data class CartProductItem(
-  val id: String,
-  val name: String,
-  val shortName: String,
-  val mrp: Int,
-  val landingPrice: Int,
-  val quantity: Int,
-  val imageUri: String? = null,
-)
+@Composable
+private fun rememberMenuHeaderSpec(
+  maxWidth: Dp,
+  maxHeight: Dp,
+): MenuHeaderSpec {
+  val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+  val phoneScreen = isPhoneScreen(maxWidth)
+  val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+    ?.getInsets(WindowInsetsCompat.Type.statusBars())
+    ?.top ?: 0
+  val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+  val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+  val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+  val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+  val actionButtonSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+  val actionIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+  val actionSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+  val actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp
+  return MenuHeaderSpec(
+    contentWidth = contentWidth,
+    horizontalPadding = horizontalPadding,
+    headerTopPadding = headerTopPadding,
+    actionButtonSize = actionButtonSize,
+    actionIconSize = actionIconSize,
+    actionSpacing = actionSpacing,
+    actionTopPadding = actionTopPadding,
+  )
+}
 
-data class OpenCartRow(
-  val id: String,
-  val title: String,
-  val items: List<CartProductItem>,
-  val customAmount: Int? = null,
-)
+@Composable
+private fun MenuHubHeader(
+  modifier: Modifier = Modifier,
+  onBack: () -> Unit,
+  actionButtonSize: Dp,
+  actionIconSize: Dp,
+  actionSpacing: Dp,
+  actionTopPadding: Dp,
+) {
+  Box(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(actionButtonSize * 3f + actionSpacing * 2f),
+  ) {
+    Column(
+      modifier = Modifier
+        .align(Alignment.TopEnd)
+        .padding(top = actionTopPadding),
+      horizontalAlignment = Alignment.End,
+      verticalArrangement = Arrangement.spacedBy(actionSpacing),
+    ) {
+      OtcHeaderActionSlot(actionButtonSize) {
+        CircleIconAction(
+          size = actionButtonSize,
+          borderColor = Accent,
+          borderWidth = 2.dp,
+          icon = {
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+              contentDescription = "Back",
+              tint = Accent,
+              modifier = Modifier.size(actionIconSize),
+            )
+          },
+          onClick = onBack,
+        )
+      }
+      OtcHeaderActionSlot(actionButtonSize)
+      OtcHeaderActionSlot(actionButtonSize)
+    }
+  }
+}
 
-data class SavedDeal(
-  val id: String,
-  val title: String,
-  val clientName: String,
-  val clientPhone: String,
-  val clientId: String,
-  val transactionCode: String,
-  val rows: List<OpenCartRow>,
+private data class PendingInvoiceExport(
+  val fileName: String,
+  val pdfBytes: ByteArray,
 )
 
 private enum class BuildProductCategory(
@@ -273,9 +470,14 @@ private data class SharePlatformAction(
   val packageName: String? = null,
 )
 
+private enum class MediaPopupTab {
+  GALLERY,
+  BROUCHER,
+  BROUCHER2,
+}
+
 @Composable
 fun AdminHomeScreen(
-  firebaseConnected: Boolean,
   pendingAccessRequests: List<AdminAccessRequest>,
   syncMessage: String?,
   onApproveRequest: (String) -> Unit,
@@ -295,48 +497,51 @@ fun AdminHomeScreen(
       .fillMaxSize()
       .background(Bg)
       .navigationBarsPadding()
-      .padding(horizontal = 24.dp, vertical = 22.dp),
+      .padding(horizontal = 16.dp, vertical = 16.dp),
   ) {
-    val contentWidth = minOf(maxWidth, 720.dp)
-    val tileGap = if (maxWidth > 700.dp) 18.dp else 12.dp
-    val tileWidth = ((contentWidth - tileGap) / 2f).coerceAtMost(218.dp)
-    val topSpacer = when {
-      maxHeight > 900.dp -> 52.dp
-      maxHeight > 700.dp -> 36.dp
-      else -> 24.dp
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val dashboardContentOffset = if (compactScreen) 4.dp else 10.dp
+    val dashboardLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val dashboardLogoHeight = (dashboardLogoWidth / 4.92f).coerceAtLeast(50.dp)
+    val dashboardTopSpacer = 14.dp
+    val dashboardTileGap = when {
+      compactScreen -> 6.dp
+      phoneScreen -> 8.dp
+      else -> layout.tileGap
     }
-    val topPadding = when {
-      maxHeight > 900.dp -> 42.dp
-      maxHeight > 700.dp -> 30.dp
-      else -> 18.dp
-    }
-    val brandTextSize = if (maxWidth > 700.dp) 75.sp else 57.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 168.dp else 126.dp
-    val poweredByHeight = if (maxWidth > 700.dp) 116.dp else 96.dp
+    val tileRows = listOf(
+      listOf(
+        DashboardTileItem(DashboardDestination.OTC, BrandButtonIcon.OTC, 40),
+        DashboardTileItem(DashboardDestination.Plants, BrandButtonIcon.Plants, 160),
+      ),
+      listOf(
+        DashboardTileItem(DashboardDestination.Supplies, BrandButtonIcon.Supplies, 280),
+        DashboardTileItem(DashboardDestination.Pots, BrandButtonIcon.Pots, 400),
+      ),
+      listOf(
+        DashboardTileItem(DashboardDestination.Docs, BrandButtonIcon.Docs, 520),
+        DashboardTileItem(DashboardDestination.Live, BrandButtonIcon.Live, 640),
+      ),
+    )
 
     Column(
       modifier = Modifier
-        .width(contentWidth)
-        .fillMaxSize()
-        .align(Alignment.TopCenter),
+        .width(layout.contentWidth)
+        .align(Alignment.Center)
+        .offset(y = dashboardContentOffset),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      Spacer(modifier = Modifier.height(topPadding))
-
       AshokvatikaLogo(
-        modifier = Modifier.fillMaxWidth(0.6f),
-        textSize = brandTextSize,
-        markSize = brandMarkSize,
-      )
-
-      Spacer(modifier = Modifier.height(14.dp))
-      FirebaseStatusCard(
-        firebaseConnected = firebaseConnected,
-        fontFamily = dmSansThin,
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+        fixedHeight = dashboardLogoHeight,
       )
 
       if (!syncMessage.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(if (compactScreen) 10.dp else 14.dp))
         Text(
           text = syncMessage,
           color = Accent,
@@ -344,12 +549,11 @@ fun AdminHomeScreen(
           style = TextStyle(
             fontFamily = dmSansThin,
             fontWeight = FontWeight.Normal,
-            fontSize = 16.sp,
-            lineHeight = 20.sp,
+            fontSize = if (compactScreen) 13.sp else 16.sp,
+            lineHeight = if (compactScreen) 17.sp else 20.sp,
           ),
         )
       }
-
       if (pendingAccessRequests.isNotEmpty()) {
         Spacer(modifier = Modifier.height(18.dp))
         PendingAccessApprovalCard(
@@ -360,134 +564,3166 @@ fun AdminHomeScreen(
         )
       }
 
-      Spacer(modifier = Modifier.height(topSpacer))
+      Spacer(modifier = Modifier.height(dashboardTopSpacer))
 
       Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(tileGap),
+        verticalArrangement = Arrangement.spacedBy(dashboardTileGap),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(tileGap, Alignment.CenterHorizontally),
-        ) {
-          DashboardTile(
-            title = DashboardDestination.OTC.title,
-            fontFamily = dmSansThin,
-            tileWidth = tileWidth,
-            icon = BrandButtonIcon.OTC,
-            delayMillis = 40,
-            animateTiles = animateTiles,
-            onClick = { onTileClick(DashboardDestination.OTC) },
-          )
-          DashboardTile(
-            title = DashboardDestination.Plants.title,
-            fontFamily = dmSansThin,
-            tileWidth = tileWidth,
-            icon = BrandButtonIcon.Plants,
-            delayMillis = 160,
-            animateTiles = animateTiles,
-            onClick = { onTileClick(DashboardDestination.Plants) },
-          )
-        }
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(tileGap, Alignment.CenterHorizontally),
-        ) {
-          DashboardTile(
-            title = DashboardDestination.Supplies.title,
-            fontFamily = dmSansThin,
-            tileWidth = tileWidth,
-            icon = BrandButtonIcon.Supplies,
-            delayMillis = 280,
-            animateTiles = animateTiles,
-            onClick = { onTileClick(DashboardDestination.Supplies) },
-          )
-          DashboardTile(
-            title = DashboardDestination.Pots.title,
-            fontFamily = dmSansThin,
-            tileWidth = tileWidth,
-            icon = BrandButtonIcon.Pots,
-            delayMillis = 400,
-            animateTiles = animateTiles,
-            onClick = { onTileClick(DashboardDestination.Pots) },
-          )
+        tileRows.forEach { row ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(dashboardTileGap, Alignment.CenterHorizontally),
+          ) {
+            row.forEach { tile ->
+              DashboardTile(
+                title = tile.destination.title,
+                fontFamily = dmSansThin,
+                tileWidth = layout.tileWidth,
+                icon = tile.icon,
+                delayMillis = tile.delayMillis,
+                animateTiles = animateTiles,
+                onClick = { onTileClick(tile.destination) },
+              )
+            }
+          }
         }
       }
+    }
 
-      Spacer(modifier = Modifier.weight(1f, fill = true))
+    Image(
+      painter = painterResource(R.drawable.logo_powered_by),
+      contentDescription = "Powered by Brand and Stock",
+      contentScale = ContentScale.Fit,
+      modifier = Modifier
+        .align(Alignment.BottomCenter)
+        .padding(bottom = if (compactScreen) 8.dp else 12.dp)
+        .fillMaxWidth(if (compactScreen) 0.34f else layout.footerWidthFraction)
+        .height(if (compactScreen) 60.dp else layout.footerHeight),
+    )
+  }
+}
 
-      Image(
-        painter = painterResource(R.drawable.logo_powered_by),
-        contentDescription = "Powered by Brand and Stock",
-        contentScale = ContentScale.Fit,
-        modifier = Modifier
-          .fillMaxWidth(0.46f)
-          .height(poweredByHeight),
+@Composable
+fun DocsHomeScreen(
+  onBack: () -> Unit,
+  onOpenAddress: () -> Unit,
+  onOpenInvoice: () -> Unit,
+  onOpenLetterhead: () -> Unit,
+  onOpenArt: () -> Unit,
+) {
+  val dmSansThin = rememberDashboardFont()
+  var animateTiles by remember { mutableStateOf(false) }
+  val tileRows = listOf(
+    listOf(
+      DocsMenuItem("Address", 40),
+      DocsMenuItem("Invoice", 160),
+    ),
+    listOf(
+      DocsMenuItem("Letterhead", 280),
+      DocsMenuItem("Client", 400),
+    ),
+    listOf(
+      DocsMenuItem("QR", 520),
+      DocsMenuItem("Art", 640),
+    ),
+  )
+
+  BackHandler(onBack = onBack)
+
+  LaunchedEffect(Unit) {
+    delay(120)
+    animateTiles = true
+  }
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val docsContentOffset = if (compactScreen) 4.dp else 10.dp
+    val docsLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val docsLogoHeight = (docsLogoWidth / 4.92f).coerceAtLeast(50.dp)
+    val logoToTilesGap = when {
+      maxWidth >= 1000.dp -> 18.dp
+      maxWidth >= 700.dp -> 16.dp
+      compactScreen -> 14.dp
+      else -> 14.dp
+    }
+    val docsTileGap = when {
+      compactScreen -> 6.dp
+      isPhoneScreen(maxWidth) -> 8.dp
+      else -> layout.tileGap
+    }
+
+    Column(
+      modifier = Modifier
+        .width(layout.contentWidth)
+        .align(Alignment.Center)
+        .offset(y = docsContentOffset),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+        fixedHeight = docsLogoHeight,
       )
 
-      Spacer(modifier = Modifier.height(12.dp))
+      Spacer(modifier = Modifier.height(logoToTilesGap))
+
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(docsTileGap),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        tileRows.forEach { row ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(docsTileGap, Alignment.CenterHorizontally),
+          ) {
+            row.forEach { item ->
+              DashboardTile(
+                title = item.title,
+                fontFamily = dmSansThin,
+                tileWidth = layout.tileWidth,
+                icon = null,
+                delayMillis = item.delayMillis,
+                animateTiles = animateTiles,
+                baseColor = item.baseColor,
+                onClick = {
+                  when (item.title) {
+                    "Address" -> onOpenAddress()
+                    "Invoice" -> onOpenInvoice()
+                    "Letterhead" -> onOpenLetterhead()
+                    "Art" -> onOpenArt()
+                  }
+                },
+              )
+            }
+          }
+        }
+      }
+    }
+
+    Image(
+      painter = painterResource(R.drawable.logo_powered_by),
+      contentDescription = "Powered by Brand and Stock",
+      contentScale = ContentScale.Fit,
+      modifier = Modifier
+        .align(Alignment.BottomCenter)
+        .padding(bottom = if (compactScreen) 8.dp else 12.dp)
+        .fillMaxWidth(if (compactScreen) 0.34f else layout.footerWidthFraction)
+        .height(if (compactScreen) 60.dp else layout.footerHeight),
+    )
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+fun ArtHomeScreen(
+  onBack: () -> Unit,
+  onOpenBrochure: () -> Unit,
+  onOpenCatTwo: () -> Unit,
+  onOpenCatFour: () -> Unit,
+  onOpenCatPlus: () -> Unit,
+  onOpenProPlus: () -> Unit,
+  onOpenProfile: () -> Unit,
+) {
+  val dmSansThin = rememberDashboardFont()
+  var animateTiles by remember { mutableStateOf(false) }
+  val tileRows = listOf(
+    listOf(
+      DocsMenuItem("Brochure", 40),
+      DocsMenuItem("Profile", 160),
+    ),
+    listOf(
+      DocsMenuItem("Pro+", 280),
+      DocsMenuItem("Cat/2", 400),
+    ),
+    listOf(
+      DocsMenuItem("Cat/4", 520),
+      DocsMenuItem("Cat+", 640, baseColor = Color(0xFFF57A2C)),
+    ),
+  )
+
+  BackHandler(onBack = onBack)
+
+  LaunchedEffect(Unit) {
+    delay(120)
+    animateTiles = true
+  }
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val artContentOffset = if (compactScreen) 4.dp else 10.dp
+    val artLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val artLogoHeight = (artLogoWidth / 4.92f).coerceAtLeast(50.dp)
+    val logoToTilesGap = when {
+      maxWidth >= 1000.dp -> 18.dp
+      maxWidth >= 700.dp -> 16.dp
+      compactScreen -> 14.dp
+      else -> 14.dp
+    }
+    val artTileGap = when {
+      compactScreen -> 6.dp
+      phoneScreen -> 8.dp
+      else -> layout.tileGap
+    }
+
+    Column(
+      modifier = Modifier
+        .width(layout.contentWidth)
+        .align(Alignment.Center)
+        .offset(y = artContentOffset),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+        fixedHeight = artLogoHeight,
+      )
+
+      Spacer(modifier = Modifier.height(logoToTilesGap))
+
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(artTileGap),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        tileRows.forEach { row ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(artTileGap, Alignment.CenterHorizontally),
+          ) {
+            row.forEach { item ->
+              DashboardTile(
+                title = item.title,
+                fontFamily = dmSansThin,
+                tileWidth = layout.tileWidth,
+                icon = null,
+                delayMillis = item.delayMillis,
+                animateTiles = animateTiles,
+                baseColor = item.baseColor,
+                onClick = {
+                  when (item.title) {
+                    "Brochure" -> onOpenBrochure()
+                    "Cat/2" -> onOpenCatTwo()
+                    "Cat/4" -> onOpenCatFour()
+                    "Cat+" -> onOpenCatPlus()
+                    "Pro+" -> onOpenProPlus()
+                    "Profile" -> onOpenProfile()
+                  }
+                },
+              )
+            }
+          }
+        }
+      }
+    }
+
+    Image(
+      painter = painterResource(R.drawable.logo_powered_by),
+      contentDescription = "Powered by Brand and Stock",
+      contentScale = ContentScale.Fit,
+      modifier = Modifier
+        .align(Alignment.BottomCenter)
+        .padding(bottom = if (compactScreen) 8.dp else 12.dp)
+        .fillMaxWidth(if (compactScreen) 0.34f else layout.footerWidthFraction)
+        .height(if (compactScreen) 60.dp else layout.footerHeight),
+    )
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+fun LiveHomeScreen(
+  onBack: () -> Unit,
+  liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
+  syncMessage: String?,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
+) {
+  val fontFamily = rememberDashboardFont()
+  val scrollState = rememberScrollState()
+  val activeLiveSessions = liveSessions.filter { session -> session.isLoggedIn }
+  val activeSessions = activeLiveSessions.size
+  val plantsInCarts = activeLiveSessions.sumOf { session ->
+    session.cartItems.sumOf { item -> item.quantity.coerceAtLeast(1) }
+  }
+  val latestSync = activeLiveSessions
+    .maxByOrNull { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+    ?.updatedAt
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val topContentPadding =
+      header.headerTopPadding + header.actionButtonSize + if (compactScreen) 6.dp else 10.dp
+    val liveLogoWidth = layout.contentWidth * layout.logoWidthFraction
+    val liveLogoHeight = (liveLogoWidth / 4.92f).coerceAtLeast(50.dp)
+    val sectionSpacing = if (compactScreen) 10.dp else 12.dp
+
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .verticalScroll(scrollState)
+        .padding(top = topContentPadding, bottom = if (compactScreen) 20.dp else 28.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(sectionSpacing),
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+        fixedHeight = liveLogoHeight,
+      )
+
+      if (!syncMessage.isNullOrBlank() || !latestSync.isNullOrBlank()) {
+        Text(
+          text = syncMessage ?: "Last synced ${formatLiveUiTimestamp(latestSync)}",
+          modifier = Modifier.width(layout.contentWidth),
+          color = if (!syncMessage.isNullOrBlank()) Accent else AccentGreen,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 14.sp else 15.sp,
+          ),
+        )
+      }
+
+      Row(
+        modifier = Modifier.width(layout.contentWidth),
+        horizontalArrangement = Arrangement.spacedBy(sectionSpacing),
+      ) {
+        LiveSummaryCard(
+          modifier = Modifier.weight(1f),
+          title = "Active now",
+          value = activeSessions.toString(),
+          caption = if (activeSessions == 1) "customer logged in" else "customers logged in",
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+        )
+        LiveSummaryCard(
+          modifier = Modifier.weight(1f),
+          title = "Plants in carts",
+          value = plantsInCarts.toString(),
+          caption = if (plantsInCarts == 1) "plant selected" else "plants selected",
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+        )
+      }
+
+      if (activeLiveSessions.isEmpty()) {
+        Surface(
+          modifier = Modifier.width(layout.contentWidth),
+          shape = CardShape,
+          color = Color.White,
+          tonalElevation = 0.dp,
+          shadowElevation = 0.dp,
+        ) {
+          Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Text(
+              text = "Waiting for customer app sync",
+              color = Ink,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = if (compactScreen) 22.sp else 25.sp,
+              ),
+            )
+            Text(
+              text = "Once a customer is logged in, this page will show the active session, session time, and plants added to cart.",
+              color = Ink.copy(alpha = 0.68f),
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = if (compactScreen) 15.sp else 17.sp,
+                lineHeight = if (compactScreen) 20.sp else 22.sp,
+              ),
+            )
+          }
+        }
+      } else {
+        Column(
+          modifier = Modifier.width(layout.contentWidth),
+          verticalArrangement = Arrangement.spacedBy(sectionSpacing),
+        ) {
+          activeLiveSessions.forEach { session ->
+            LiveSessionCard(
+              session = session,
+              inventoryItems = inventoryItems,
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+              phoneScreen = phoneScreen,
+              onAddProductToCart = onAddProductToCart,
+            )
+          }
+        }
+      }
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+private fun LiveSummaryCard(
+  modifier: Modifier = Modifier,
+  title: String,
+  value: String,
+  caption: String,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = CardShape,
+    color = Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Text(
+        text = title,
+        color = Ink.copy(alpha = 0.62f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+      Text(
+        text = value,
+        color = Accent,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 28.sp else 34.sp,
+        ),
+      )
+      Text(
+        text = caption,
+        color = Ink.copy(alpha = 0.62f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 13.sp else 14.sp,
+        ),
+      )
     }
   }
 }
 
 @Composable
-private fun FirebaseStatusCard(
-  firebaseConnected: Boolean,
+private fun LiveSessionCard(
+  session: LiveCustomerSession,
+  inventoryItems: List<InventoryItem>,
   fontFamily: FontFamily,
+  compactScreen: Boolean,
+  phoneScreen: Boolean,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
 ) {
-  val title = if (firebaseConnected) "Firebase Connected" else "Firebase Not Connected"
-  val subtitle = if (firebaseConnected) {
-    "Inventory and checkout data can sync to cloud."
-  } else {
-    "App is running locally. Cloud sync is off."
-  }
-  val accentColor = if (firebaseConnected) AccentGreen else Accent
-  val backgroundColor = if (firebaseConnected) Color(0xFFEAF7EE) else Color(0xFFFFF1E6)
-
+  var expanded by rememberSaveable(session.sessionId) { mutableStateOf(false) }
+  var showProductPicker by rememberSaveable(session.sessionId) { mutableStateOf(false) }
   Surface(
-    modifier = Modifier.fillMaxWidth(),
-    shape = CardShape,
-    color = backgroundColor,
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+    color = Color.White,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
-    Row(
-      modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(
+      modifier = Modifier.fillMaxWidth(),
     ) {
-      Box(
+      val cardPadding = if (compactScreen) 18.dp else 22.dp
+      val previewSpacing = if (compactScreen) 14.dp else 18.dp
+      val previewSize = if (compactScreen) 74.dp else 88.dp
+      val metricWidth = if (phoneScreen) minOf(maxWidth * 0.34f, 132.dp) else 156.dp
+      val metricHeight = if (compactScreen) 102.dp else 116.dp
+      val totalPlants = session.cartItems.sumOf { it.quantity.coerceAtLeast(1) }
+      val sessionDuration = formatLiveSessionDuration(
+        sessionStartedAt = session.sessionStartedAt,
+        lastSeenAt = if (session.isLoggedIn) null else session.lastSeenAt ?: session.updatedAt,
+      )
+
+      Column(
         modifier = Modifier
-          .size(14.dp)
-          .background(accentColor, CircleShape),
+          .fillMaxWidth()
+          .padding(horizontal = cardPadding, vertical = cardPadding),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.Top,
+        ) {
+          LiveSessionIdentity(
+            session = session,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+          )
+          LiveStatusPill(
+            isLoggedIn = session.isLoggedIn,
+            fontFamily = fontFamily,
+          )
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(previewSpacing),
+          verticalAlignment = Alignment.Top,
+        ) {
+          LiveSessionMetricPanel(
+            modifier = Modifier
+              .width(metricWidth)
+              .height(metricHeight),
+            expanded = expanded,
+            sessionDuration = sessionDuration,
+            totalPlants = totalPlants,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+          )
+
+          if (session.cartItems.isEmpty()) {
+            LiveEmptyCartPanel(
+              modifier = Modifier
+                .weight(1f)
+                .height(metricHeight),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+          } else {
+            Row(
+              modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(previewSpacing),
+              verticalAlignment = Alignment.Top,
+            ) {
+              session.cartItems.forEach { item ->
+                LiveCartPreviewItem(
+                  item = item,
+                  fontFamily = fontFamily,
+                  compactScreen = compactScreen,
+                  previewSize = previewSize,
+                )
+              }
+            }
+          }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          LiveMoreButton(
+            expanded = expanded,
+            fontFamily = fontFamily,
+            onClick = { expanded = !expanded },
+          )
+        }
+
+        if (expanded) {
+          Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            LiveDetailLine(
+              label = "Session started",
+              value = formatLiveUiTimestamp(session.sessionStartedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+            LiveDetailLine(
+              label = "Last seen",
+              value = formatLiveUiTimestamp(session.lastSeenAt ?: session.updatedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+            LiveDetailLine(
+              label = "Cart updated",
+              value = formatLiveUiTimestamp(session.cartUpdatedAt ?: session.updatedAt),
+              fontFamily = fontFamily,
+              compactScreen = compactScreen,
+            )
+            LiveAddProductButton(
+              enabled = inventoryItems.isNotEmpty(),
+              fontFamily = fontFamily,
+              onClick = { showProductPicker = true },
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (showProductPicker) {
+    LiveProductPickerDialog(
+      session = session,
+      inventoryItems = inventoryItems,
+      fontFamily = fontFamily,
+      onDismiss = { showProductPicker = false },
+      onAddProduct = { item ->
+        onAddProductToCart(session, item)
+        showProductPicker = false
+      },
+    )
+  }
+}
+
+@Composable
+private fun LiveSessionIdentity(
+  session: LiveCustomerSession,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Column(
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Text(
+      text = session.customerName.ifBlank { "Customer" },
+      color = Ink,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 22.sp else 26.sp,
+      ),
+    )
+    val secondary = listOfNotNull(
+      session.customerPhone.takeIf { it.isNotBlank() },
+      session.customerId.takeIf { it.isNotBlank() }?.let { "ID $it" },
+    ).joinToString(" | ")
+    if (secondary.isNotBlank()) {
+      Text(
+        text = secondary,
+        color = Accent.copy(alpha = 0.76f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveStatusPill(
+  isLoggedIn: Boolean,
+  fontFamily: FontFamily,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = if (isLoggedIn) AccentGreen.copy(alpha = 0.14f) else Accent.copy(alpha = 0.12f),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Text(
+      text = if (isLoggedIn) "Logged in" else "Logged out",
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+      color = if (isLoggedIn) AccentGreen else Accent,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveMoreButton(
+  expanded: Boolean,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+    modifier = Modifier.clickable(onClick = onClick),
+  ) {
+    Text(
+      text = if (expanded) "Less" else "More",
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+      color = Accent,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveSessionMetricPanel(
+  modifier: Modifier = Modifier,
+  expanded: Boolean,
+  sessionDuration: String,
+  totalPlants: Int,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 14.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(
+        text = if (expanded) sessionDuration else if (totalPlants == 0) "Cart" else "Cart $totalPlants",
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 23.sp else 28.sp,
+        ),
       )
       Column(
         verticalArrangement = Arrangement.spacedBy(2.dp),
       ) {
         Text(
-          text = title,
-          color = accentColor,
+          text = if (expanded) "Session time" else "Tap more to view time",
+          color = Ink.copy(alpha = 0.7f),
           style = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = 20.sp,
-            lineHeight = 24.sp,
+            fontSize = if (compactScreen) 12.sp else 13.sp,
           ),
         )
         Text(
-          text = subtitle,
-          color = Ink,
+          text = if (totalPlants == 1) "1 plant in cart" else "$totalPlants plants in cart",
+          color = Accent.copy(alpha = 0.78f),
           style = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = 14.sp,
-            lineHeight = 18.sp,
+            fontSize = if (compactScreen) 11.sp else 12.sp,
           ),
         )
       }
     }
+  }
+}
+
+@Composable
+private fun LiveEmptyCartPanel(
+  modifier: Modifier = Modifier,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    modifier = modifier,
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+    color = Color(0xFFFFFCF7),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 16.dp, vertical = 14.dp),
+      verticalArrangement = Arrangement.Center,
+      horizontalAlignment = Alignment.Start,
+    ) {
+      Text(
+        text = "Plants in cart",
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 16.sp else 18.sp,
+        ),
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        text = "No plants have been added yet.",
+        color = Ink.copy(alpha = 0.6f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 13.sp else 14.sp,
+          lineHeight = if (compactScreen) 18.sp else 19.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveCartPreviewItem(
+  item: LiveCartPlant,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+  previewSize: Dp,
+) {
+  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 720)
+  Column(
+    modifier = Modifier.widthIn(min = previewSize, max = previewSize + 12.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Box(
+      modifier = Modifier
+        .size(previewSize)
+        .clip(CircleShape)
+        .background(Accent),
+        contentAlignment = Alignment.Center,
+    ) {
+      if (imageBitmap != null) {
+        Image(
+          bitmap = imageBitmap!!,
+          contentDescription = item.plantName,
+          contentScale = ContentScale.Crop,
+          modifier = Modifier.fillMaxSize(),
+        )
+      } else {
+        Text(
+          text = liveCartInitials(item.plantName),
+          color = Color.White,
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Thin,
+            fontSize = if (compactScreen) 18.sp else 20.sp,
+            lineHeight = if (compactScreen) 18.sp else 20.sp,
+          ),
+        )
+      }
+    }
+
+    Text(
+      text = item.plantName.ifBlank { "Plant" },
+      maxLines = 2,
+      textAlign = TextAlign.Center,
+      color = Ink,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+        lineHeight = if (compactScreen) 16.sp else 17.sp,
+      ),
+    )
+    Text(
+      text = "Qty ${item.quantity.coerceAtLeast(1)}",
+      color = Ink.copy(alpha = 0.62f),
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 13.sp else 14.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveDetailLine(
+  label: String,
+  value: String,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      text = label,
+      color = Ink.copy(alpha = 0.58f),
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+      ),
+    )
+    Spacer(modifier = Modifier.width(12.dp))
+    Text(
+      text = value,
+      color = Ink,
+      textAlign = TextAlign.End,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = if (compactScreen) 14.sp else 15.sp,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun LiveAddProductButton(
+  enabled: Boolean,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = if (enabled) Accent.copy(alpha = 0.1f) else PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+    modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        imageVector = Icons.Filled.ShoppingCart,
+        contentDescription = "Add product to customer cart",
+        tint = if (enabled) Accent else Ink.copy(alpha = 0.35f),
+        modifier = Modifier.size(18.dp),
+      )
+      Text(
+        text = if (enabled) "Add product to cart" else "Inventory unavailable",
+        color = if (enabled) Accent else Ink.copy(alpha = 0.48f),
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 14.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveProductPickerDialog(
+  session: LiveCustomerSession,
+  inventoryItems: List<InventoryItem>,
+  fontFamily: FontFamily,
+  onDismiss: () -> Unit,
+  onAddProduct: (InventoryItem) -> Unit,
+) {
+  val products = inventoryItems
+    .filter { item ->
+      item.category == DashboardDestination.Plants ||
+        item.category == DashboardDestination.Pots ||
+        item.category == DashboardDestination.Supplies
+    }
+    .sortedWith(compareBy<InventoryItem> { it.category.title }.thenBy { it.name.lowercase(Locale.US) })
+
+  Dialog(onDismissRequest = onDismiss) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(0.94f),
+      shape = CardShape,
+      color = Color.White,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+          ) {
+            Text(
+              text = "Add to cart",
+              color = Ink,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 24.sp),
+            )
+            Text(
+              text = session.customerName.ifBlank { "Customer" },
+              color = Accent.copy(alpha = 0.78f),
+              maxLines = 1,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
+            )
+          }
+          CircleIconAction(
+            size = 38.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close",
+                tint = Accent,
+              )
+            },
+            onClick = onDismiss,
+          )
+        }
+
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 420.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          items(products, key = { item -> item.id }) { item ->
+            LiveProductPickerRow(
+              item = item,
+              fontFamily = fontFamily,
+              onClick = { onAddProduct(item) },
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LiveProductPickerRow(
+  item: InventoryItem,
+  fontFamily: FontFamily,
+  onClick: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(onClick = onClick),
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Surface(
+        modifier = Modifier.size(42.dp),
+        shape = CircleShape,
+        color = Accent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Text(
+            text = liveCartInitials(item.name),
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Thin, fontSize = 13.sp),
+          )
+        }
+      }
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          text = item.name,
+          color = Ink,
+          maxLines = 1,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
+        )
+        Text(
+          text = "${item.category.title} | Rs ${formatAmount(item.price.orZero().toIntOrNull() ?: 0)}",
+          color = Ink.copy(alpha = 0.58f),
+          maxLines = 1,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp),
+        )
+      }
+      Icon(
+        imageVector = Icons.Filled.Add,
+        contentDescription = "Add product",
+        tint = Accent,
+        modifier = Modifier.size(22.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun LiveCartItemRow(
+  itemName: String,
+  quantity: Int,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+) {
+  Surface(
+    shape = CircleShape,
+    color = PanelTint,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = itemName.ifBlank { "Plant" },
+        color = Ink,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+      Text(
+        text = "x${quantity.coerceAtLeast(1)}",
+        color = Accent,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = if (compactScreen) 14.sp else 15.sp,
+        ),
+      )
+    }
+  }
+}
+
+private fun liveCartInitials(name: String): String {
+  val words = name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+  if (words.isEmpty()) return "PL"
+  return words.take(2).joinToString("") { it.take(1) }.uppercase(Locale.US)
+}
+
+private fun formatLiveUiTimestamp(value: String?): String {
+  val timestamp = parseLiveUiTimestampMillis(value) ?: return "Not available"
+  return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date(timestamp))
+}
+
+private fun formatLiveSessionDuration(
+  sessionStartedAt: String?,
+  lastSeenAt: String?,
+): String {
+  val start = parseLiveUiTimestampMillis(sessionStartedAt) ?: return "Not available"
+  val end = parseLiveUiTimestampMillis(lastSeenAt) ?: System.currentTimeMillis()
+  val diff = (end - start).coerceAtLeast(0L)
+  val hours = diff / 3_600_000L
+  val minutes = (diff % 3_600_000L) / 60_000L
+  val seconds = (diff % 60_000L) / 1000L
+  return when {
+    hours > 0L -> "${hours}h ${minutes}m"
+    minutes > 0L -> "${minutes}m ${seconds}s"
+    else -> "${seconds}s"
+  }
+}
+
+private fun parseLiveUiTimestampMillis(value: String?): Long? {
+  val raw = value?.trim().orEmpty()
+  if (raw.isBlank()) return null
+  raw.toLongOrNull()?.let { numeric ->
+    return if (numeric > 1000000000000L) numeric else numeric * 1000L
+  }
+  val patterns = listOf(
+    "yyyy-MM-dd'T'HH:mm:ss.SSSX" to null,
+    "yyyy-MM-dd'T'HH:mm:ssX" to null,
+    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd'T'HH:mm:ss'Z'" to TimeZone.getTimeZone("UTC"),
+    "yyyy-MM-dd HH:mm:ss" to null,
+    "dd-MM-yyyy HH:mm:ss" to null,
+  )
+  patterns.forEach { (pattern, timeZone) ->
+    runCatching {
+      SimpleDateFormat(pattern, Locale.US).apply {
+        if (timeZone != null) {
+          this.timeZone = timeZone
+        }
+      }.parse(raw)?.time
+    }.getOrNull()?.let { return it }
+  }
+  return null
+}
+
+@Composable
+fun AddressInfoScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val layout = menuScreenLayoutSpec(maxWidth, maxHeight)
+    val contentWidth = when {
+      maxWidth >= 1000.dp -> 720.dp
+      maxWidth >= 700.dp -> 640.dp
+      else -> minOf(maxWidth, 540.dp)
+    }
+    val mapIconSize = when {
+      maxWidth >= 1000.dp -> 90.dp
+      maxWidth >= 700.dp -> 78.dp
+      compactScreen -> 52.dp
+      else -> 64.dp
+    }
+    val mapLinkSize = when {
+      maxWidth >= 1000.dp -> 22.sp
+      maxWidth >= 700.dp -> 19.sp
+      compactScreen -> 12.sp
+      else -> 14.sp
+    }
+    val titleSize = when {
+      maxWidth >= 1000.dp -> 52.sp
+      maxWidth >= 700.dp -> 44.sp
+      compactScreen -> 26.sp
+      else -> 34.sp
+    }
+    val detailSize = when {
+      maxWidth >= 1000.dp -> 30.sp
+      maxWidth >= 700.dp -> 25.sp
+      compactScreen -> 16.sp
+      else -> 21.sp
+    }
+    val contactSize = when {
+      maxWidth >= 1000.dp -> 28.sp
+      maxWidth >= 700.dp -> 23.sp
+      compactScreen -> 15.sp
+      else -> 20.sp
+    }
+    val socialSize = when {
+      maxWidth >= 1000.dp -> 82.dp
+      maxWidth >= 700.dp -> 72.dp
+      compactScreen -> 48.dp
+      else -> 58.dp
+    }
+    val socialSpacing = when {
+      maxWidth >= 700.dp -> 22.dp
+      compactScreen -> 12.dp
+      else -> 16.dp
+    }
+    val mapUrl = "https://maps.app.goo.gl/hrvhQ97MA8PT8DhTA"
+    val emailAddress = "ashokvatika@gmail.com"
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Spacer(modifier = Modifier.height(layout.topPadding))
+
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(layout.logoWidthFraction.coerceAtMost(0.82f)),
+        textSize = layout.brandTextSize,
+        markSize = layout.brandMarkSize,
+      )
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 34.dp else 44.dp))
+
+      Surface(
+        color = Color.Transparent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.clickable {
+          launchExternalUri(context, mapUrl)
+        },
+      ) {
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(if (compactScreen) 8.dp else 10.dp),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.LocationOn,
+            contentDescription = "Map location",
+            tint = Color(0xFFE11D15),
+            modifier = Modifier.size(mapIconSize),
+          )
+          Text(
+            text = mapUrl,
+            color = Ink.copy(alpha = 0.36f),
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = mapLinkSize,
+            ),
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 30.dp else 40.dp))
+
+      Text(
+        text = "Ashokvatika Nursery",
+        color = Ink,
+        textAlign = TextAlign.Center,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = titleSize,
+          lineHeight = titleSize * 1.08f,
+        ),
+      )
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 14.dp else 20.dp))
+
+      Text(
+        text = "Vallabhbhbhai Patel Road,\nMahakali, Andheri - East,\nMumbai 400 093",
+        color = Ink.copy(alpha = 0.56f),
+        textAlign = TextAlign.Center,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = detailSize,
+          lineHeight = detailSize * 1.04f,
+        ),
+      )
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 20.dp else 28.dp))
+
+      AddressInfoAction(
+        icon = Icons.Filled.Call,
+        text = "+91 78085 80855\n+91 981981 7780",
+        fontFamily = fontFamily,
+        textSize = contactSize,
+        onClick = { launchExternalUri(context, "tel:+917808580855") },
+      )
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 18.dp else 24.dp))
+
+      AddressInfoAction(
+        icon = Icons.Filled.Mail,
+        text = emailAddress,
+        fontFamily = fontFamily,
+        textSize = contactSize,
+        onClick = { launchExternalUri(context, "mailto:$emailAddress") },
+      )
+
+      Spacer(modifier = Modifier.height(if (compactScreen) 34.dp else 48.dp))
+
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(socialSpacing),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        AddressSocialBadge(
+          label = "IG",
+          fontFamily = fontFamily,
+          background = Color(0xFFE95950),
+          size = socialSize,
+          onClick = {},
+        )
+        AddressSocialBadge(
+          label = "WA",
+          fontFamily = fontFamily,
+          background = Color(0xFF4CD964),
+          size = socialSize,
+          onClick = { launchExternalUri(context, "https://wa.me/919819817780") },
+        )
+        AddressSocialBadge(
+          label = "f",
+          fontFamily = fontFamily,
+          background = Color(0xFF1877F2),
+          size = socialSize,
+          onClick = {},
+        )
+        AddressSocialBadge(
+          label = "YT",
+          background = Color(0xFFFF0000),
+          size = socialSize,
+          onClick = {},
+        )
+      }
+
+      Spacer(modifier = Modifier.height(if (phoneScreen) 32.dp else 42.dp))
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+fun LetterheadScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val fontFamily = rememberDashboardFont()
+  var letterBody by rememberSaveable { mutableStateOf("") }
+  var isReadyToExport by rememberSaveable { mutableStateOf(false) }
+  var pendingExport by remember { mutableStateOf<PendingInvoiceExport?>(null) }
+  val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+    val export = pendingExport
+    pendingExport = null
+    if (export == null) {
+      return@rememberLauncherForActivityResult
+    }
+    scope.launch {
+      val saved = if (uri == null) {
+        false
+      } else {
+        withContext(Dispatchers.IO) {
+          runCatching {
+            context.contentResolver.openOutputStream(uri, "rwt")?.use { stream ->
+              stream.write(export.pdfBytes)
+              stream.flush()
+            } != null
+          }.getOrDefault(false)
+        }
+      }
+      Toast.makeText(
+        context,
+        when {
+          uri == null -> "Letterhead export was skipped."
+          saved -> "Letterhead PDF saved successfully."
+          else -> "Letterhead PDF save failed."
+        },
+        Toast.LENGTH_SHORT,
+      ).show()
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 12.dp, vertical = 8.dp),
+  ) {
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val contentTopPadding = header.headerTopPadding + if (phoneScreen) 20.dp else 26.dp
+    val bodyFontSize = when {
+      maxWidth >= 1000.dp -> 21.sp
+      maxWidth >= 700.dp -> 18.sp
+      compactScreen -> 13.sp
+      else -> 15.sp
+    }
+    val letterheadHeaderWidthFraction = when {
+      maxWidth >= 1000.dp -> 0.38f
+      maxWidth >= 700.dp -> 0.46f
+      compactScreen -> 0.62f
+      else -> 0.56f
+    }
+    val letterheadFooterWidthFraction = when {
+      maxWidth >= 1000.dp -> 0.42f
+      maxWidth >= 700.dp -> 0.52f
+      compactScreen -> 0.8f
+      else -> 0.74f
+    }
+    val editorTopGap = when {
+      maxWidth >= 1000.dp -> 26.dp
+      maxWidth >= 700.dp -> 22.dp
+      compactScreen -> 18.dp
+      else -> 20.dp
+    }
+    val editorBottomGap = when {
+      maxWidth >= 1000.dp -> 28.dp
+      maxWidth >= 700.dp -> 24.dp
+      compactScreen -> 16.dp
+      else -> 18.dp
+    }
+    val editorHorizontalPadding = when {
+      maxWidth >= 1000.dp -> 44.dp
+      maxWidth >= 700.dp -> 36.dp
+      compactScreen -> 14.dp
+      else -> 18.dp
+    }
+
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(top = contentTopPadding),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Image(
+        painter = painterResource(R.drawable.letterhead_header),
+        contentDescription = "Letterhead header",
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier
+          .fillMaxWidth(letterheadHeaderWidthFraction),
+      )
+
+      Spacer(modifier = Modifier.height(editorTopGap))
+
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .fillMaxWidth()
+          .padding(horizontal = editorHorizontalPadding),
+      ) {
+        BasicTextField(
+          value = letterBody,
+          onValueChange = {
+            letterBody = it
+            isReadyToExport = false
+          },
+          modifier = Modifier.fillMaxSize(),
+          textStyle = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = bodyFontSize,
+            lineHeight = bodyFontSize * 1.45f,
+            color = Ink,
+          ),
+          cursorBrush = SolidColor(Accent),
+          keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+          keyboardActions = KeyboardActions(
+            onDone = {
+              isReadyToExport = letterBody.isNotBlank()
+            },
+          ),
+          decorationBox = { innerTextField ->
+            Box(modifier = Modifier.fillMaxSize()) {
+              if (letterBody.isBlank()) {
+                Text(
+                  text = "Type the letter here...",
+                  color = Ink.copy(alpha = 0.18f),
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = bodyFontSize,
+                    lineHeight = bodyFontSize * 1.45f,
+                  ),
+                )
+              }
+              innerTextField()
+            }
+          },
+        )
+      }
+
+      Spacer(modifier = Modifier.height(editorBottomGap))
+
+      Image(
+        painter = painterResource(R.drawable.letterhead_footer),
+        contentDescription = "Letterhead footer",
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier
+          .fillMaxWidth(letterheadFooterWidthFraction)
+          .padding(bottom = if (compactScreen) 6.dp else 10.dp),
+      )
+    }
+
+    Box(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding)
+        .fillMaxWidth()
+        .height(header.actionButtonSize * 3f + header.actionSpacing * 2f),
+    ) {
+      Column(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(top = header.actionTopPadding),
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(header.actionSpacing),
+      ) {
+        OtcHeaderActionSlot(header.actionButtonSize) {
+          CircleIconAction(
+            size = header.actionButtonSize,
+            borderColor = Accent,
+            borderWidth = 2.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Accent,
+                modifier = Modifier.size(header.actionIconSize),
+              )
+            },
+            onClick = onBack,
+          )
+        }
+        OtcHeaderActionSlot(header.actionButtonSize) {
+          if (letterBody.isNotBlank()) {
+            CircleIconAction(
+              size = header.actionButtonSize,
+              borderColor = Accent,
+              borderWidth = 2.dp,
+              icon = {
+                Icon(
+                  imageVector = Icons.Filled.Check,
+                  contentDescription = "Done typing",
+                  tint = Accent,
+                  modifier = Modifier.size(header.actionIconSize),
+                )
+              },
+              onClick = {
+                isReadyToExport = true
+              },
+            )
+          }
+        }
+        OtcHeaderActionSlot(header.actionButtonSize) {
+          if (isReadyToExport && letterBody.isNotBlank()) {
+            CircleIconAction(
+              size = header.actionButtonSize,
+              borderColor = Accent,
+              borderWidth = 2.dp,
+              icon = {
+                Text(
+                  text = "PDF",
+                  color = Accent,
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (compactScreen) 10.sp else 12.sp,
+                  ),
+                )
+              },
+              onClick = {
+                val pdfBytes = runCatching {
+                  buildLetterheadPdf(context, letterBody)
+                }.getOrNull()
+                if (pdfBytes == null) {
+                  Toast.makeText(context, "Letterhead PDF generation failed.", Toast.LENGTH_SHORT).show()
+                } else {
+                  val export = PendingInvoiceExport(
+                    fileName = buildLetterheadFileName(),
+                    pdfBytes = pdfBytes,
+                  )
+                  pendingExport = export
+                  exportLauncher.launch(export.fileName)
+                }
+              },
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+private fun buildLetterheadFileName(): String {
+  return "ASHOKVATIKA_letterhead_${System.currentTimeMillis()}.pdf"
+}
+
+private data class InvoiceDraftLine(
+  val id: Long,
+  val description: String,
+  val quantity: String,
+  val unitPrice: String,
+)
+
+@Composable
+fun InvoiceCreateScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val fontFamily = rememberDashboardFont()
+  var clientName by rememberSaveable { mutableStateOf("") }
+  var clientPhone by rememberSaveable { mutableStateOf("") }
+  var clientId by rememberSaveable { mutableStateOf("") }
+  var transactionCode by rememberSaveable { mutableStateOf(generateTransactionCode()) }
+  val invoiceLines = remember {
+    mutableStateListOf(
+      InvoiceDraftLine(
+        id = System.currentTimeMillis(),
+        description = "Plant purchase",
+        quantity = "1",
+        unitPrice = "",
+      ),
+    )
+  }
+  var pendingExport by remember { mutableStateOf<PendingInvoiceExport?>(null) }
+  val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+    val export = pendingExport
+    pendingExport = null
+    if (export == null) {
+      return@rememberLauncherForActivityResult
+    }
+    scope.launch {
+      val saved = if (uri == null) {
+        false
+      } else {
+        withContext(Dispatchers.IO) {
+          runCatching {
+            context.contentResolver.openOutputStream(uri, "rwt")?.use { stream ->
+              stream.write(export.pdfBytes)
+              stream.flush()
+            } != null
+          }.getOrDefault(false)
+        }
+      }
+      Toast.makeText(
+        context,
+        when {
+          uri == null -> "Invoice export was skipped."
+          saved -> "Invoice PDF saved successfully."
+          else -> "Invoice PDF save failed."
+        },
+        Toast.LENGTH_SHORT,
+      ).show()
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val contentWidth = when {
+      maxWidth >= 1000.dp -> 760.dp
+      maxWidth >= 700.dp -> 680.dp
+      else -> minOf(maxWidth, 560.dp)
+    }
+    val titleSize = when {
+      maxWidth >= 1000.dp -> 44.sp
+      maxWidth >= 700.dp -> 38.sp
+      compactScreen -> 25.sp
+      else -> 30.sp
+    }
+    val contentTopPadding = header.headerTopPadding + if (isPhoneScreen(maxWidth)) 24.dp else 34.dp
+    val validLines = invoiceLines.mapNotNull { line ->
+      val quantity = line.quantity.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 0
+      val unitPrice = line.unitPrice.filter(Char::isDigit).toIntOrNull() ?: 0
+      if (line.description.isBlank() || quantity <= 0 || unitPrice <= 0) {
+        null
+      } else {
+        line to (quantity to unitPrice)
+      }
+    }
+    val totalAmount = validLines.sumOf { (_, amount) -> amount.first * amount.second }
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(top = contentTopPadding, bottom = 28.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(if (compactScreen) 14.dp else 18.dp),
+    ) {
+      AshokvatikaLogo(
+        modifier = Modifier.fillMaxWidth(if (compactScreen) 0.68f else 0.52f),
+        textSize = if (compactScreen) 42.sp else 58.sp,
+        markSize = if (compactScreen) 92.dp else 128.dp,
+      )
+
+      Text(
+        text = "Create Invoice",
+        color = Ink,
+        textAlign = TextAlign.Center,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = titleSize,
+          lineHeight = titleSize * 1.08f,
+        ),
+      )
+
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .shadow(12.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+        shape = CardShape,
+        color = Panel,
+        border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+      ) {
+        Column(
+          modifier = Modifier.padding(if (compactScreen) 14.dp else 18.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          InvoiceDraftField(
+            label = "Client name",
+            value = clientName,
+            placeholder = "Walk-in customer",
+            fontFamily = fontFamily,
+            onValueChange = { clientName = it },
+          )
+          InvoiceDraftField(
+            label = "Phone",
+            value = clientPhone,
+            placeholder = "Customer phone",
+            fontFamily = fontFamily,
+            numeric = true,
+            onValueChange = { clientPhone = it.filter(Char::isDigit) },
+          )
+          InvoiceDraftField(
+            label = "Client ID",
+            value = clientId,
+            placeholder = "Optional",
+            fontFamily = fontFamily,
+            onValueChange = { clientId = it },
+          )
+          InvoiceDraftField(
+            label = "Transaction / POS",
+            value = transactionCode,
+            placeholder = "Invoice reference",
+            fontFamily = fontFamily,
+            onValueChange = { transactionCode = it.uppercase(Locale.US) },
+          )
+        }
+      }
+
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        invoiceLines.forEachIndexed { index, line ->
+          InvoiceLineEditor(
+            line = line,
+            index = index,
+            canRemove = invoiceLines.size > 1,
+            fontFamily = fontFamily,
+            onLineChange = { updated -> invoiceLines[index] = updated },
+            onRemove = { invoiceLines.removeAt(index) },
+          )
+        }
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        ActionButtonCard(
+          title = "Add item",
+          color = AccentGreen,
+          fontFamily = fontFamily,
+          onClick = {
+            invoiceLines += InvoiceDraftLine(
+              id = System.currentTimeMillis() + invoiceLines.size,
+              description = "",
+              quantity = "1",
+              unitPrice = "",
+            )
+          },
+          modifier = Modifier.weight(1f),
+        )
+        Surface(
+          modifier = Modifier
+            .weight(1f)
+            .shadow(10.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+          shape = CardShape,
+          color = Accent,
+          tonalElevation = 0.dp,
+          shadowElevation = 0.dp,
+        ) {
+          Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+          ) {
+            Text(
+              text = "Total",
+              color = Color.White.copy(alpha = 0.82f),
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp),
+            )
+            Text(
+              text = "₹${formatAmount(totalAmount)}",
+              color = Color.White,
+              style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 20.sp),
+            )
+          }
+        }
+      }
+
+      ActionButtonCard(
+        title = "Create invoice PDF",
+        color = Accent,
+        fontFamily = fontFamily,
+        onClick = {
+          if (validLines.isEmpty()) {
+            Toast.makeText(context, "Add at least one item with amount.", Toast.LENGTH_SHORT).show()
+            return@ActionButtonCard
+          }
+          val deal = SavedDeal(
+            id = "manual-invoice-${System.currentTimeMillis()}",
+            title = "Manual Invoice",
+            clientName = clientName.ifBlank { "Walk-in customer" },
+            clientPhone = clientPhone.filter(Char::isDigit),
+            clientId = clientId.trim(),
+            transactionCode = transactionCode.ifBlank { generateTransactionCode() },
+            rows = validLines.mapIndexed { rowIndex, (line, amount) ->
+              val quantity = amount.first
+              val unitPrice = amount.second
+              OpenCartRow(
+                id = "manual-invoice-row-${line.id}",
+                title = line.description.ifBlank { "Item ${rowIndex + 1}" },
+                items = listOf(
+                  CartProductItem(
+                    id = "manual-invoice-item-${line.id}",
+                    name = line.description.ifBlank { "Item ${rowIndex + 1}" },
+                    shortName = buildInvoiceShortName(line.description),
+                    mrp = unitPrice,
+                    landingPrice = unitPrice,
+                    quantity = quantity,
+                  ),
+                ),
+              )
+            },
+          )
+          val pdfBytes = runCatching { buildInvoicePdf(context, deal) }.getOrNull()
+          if (pdfBytes == null) {
+            Toast.makeText(context, "Invoice PDF generation failed.", Toast.LENGTH_SHORT).show()
+          } else {
+            val export = PendingInvoiceExport(
+              fileName = buildInvoiceFileName(deal),
+              pdfBytes = pdfBytes,
+            )
+            pendingExport = export
+            exportLauncher.launch(export.fileName)
+          }
+        },
+        modifier = Modifier.fillMaxWidth(),
+      )
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+private fun InvoiceLineEditor(
+  line: InvoiceDraftLine,
+  index: Int,
+  canRemove: Boolean,
+  fontFamily: FontFamily,
+  onLineChange: (InvoiceDraftLine) -> Unit,
+  onRemove: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .shadow(10.dp, CardShape, ambientColor = SoftGreyShadow, spotColor = SoftGreyShadow),
+    shape = CardShape,
+    color = PanelTint,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Text(
+          text = "Item ${index + 1}",
+          color = Ink,
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp),
+        )
+        if (canRemove) {
+          CircleIconAction(
+            size = 34.dp,
+            borderColor = Accent,
+            borderWidth = 1.dp,
+            shadowElevation = 4.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Remove item",
+                tint = Accent,
+                modifier = Modifier.size(16.dp),
+              )
+            },
+            onClick = onRemove,
+          )
+        }
+      }
+      InvoiceDraftField(
+        label = "Description",
+        value = line.description,
+        placeholder = "Product or service",
+        fontFamily = fontFamily,
+        onValueChange = { onLineChange(line.copy(description = it)) },
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        InvoiceDraftField(
+          label = "Qty",
+          value = line.quantity,
+          placeholder = "1",
+          fontFamily = fontFamily,
+          numeric = true,
+          modifier = Modifier.weight(0.42f),
+          onValueChange = { onLineChange(line.copy(quantity = it.filter(Char::isDigit))) },
+        )
+        InvoiceDraftField(
+          label = "Amount",
+          value = line.unitPrice,
+          placeholder = "0",
+          fontFamily = fontFamily,
+          numeric = true,
+          modifier = Modifier.weight(0.58f),
+          onValueChange = { onLineChange(line.copy(unitPrice = it.filter(Char::isDigit))) },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun InvoiceDraftField(
+  label: String,
+  value: String,
+  placeholder: String,
+  fontFamily: FontFamily,
+  onValueChange: (String) -> Unit,
+  modifier: Modifier = Modifier,
+  numeric: Boolean = false,
+) {
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Text(
+      text = label,
+      color = Ink.copy(alpha = 0.62f),
+      style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Bold, fontSize = 13.sp),
+    )
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+      color = Color.White,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 12.dp, vertical = 12.dp),
+        singleLine = true,
+        cursorBrush = SolidColor(Accent),
+        keyboardOptions = KeyboardOptions(
+          keyboardType = if (numeric) androidx.compose.ui.text.input.KeyboardType.Number else androidx.compose.ui.text.input.KeyboardType.Text,
+          imeAction = ImeAction.Done,
+        ),
+        textStyle = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Normal,
+          fontSize = 16.sp,
+          color = Ink,
+        ),
+        decorationBox = { innerTextField ->
+          Box(modifier = Modifier.fillMaxWidth()) {
+            if (value.isBlank()) {
+              Text(
+                text = placeholder,
+                color = Ink.copy(alpha = 0.22f),
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 16.sp,
+                ),
+              )
+            }
+            innerTextField()
+          }
+        },
+      )
+    }
+  }
+}
+
+private fun buildInvoiceShortName(description: String): String {
+  return description
+    .split(Regex("\\s+"))
+    .filter { it.isNotBlank() }
+    .take(2)
+    .joinToString("") { it.take(1).uppercase(Locale.US) }
+    .ifBlank { "IN" }
+}
+@Composable
+fun ArtBrochureScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var productName by rememberSaveable { mutableStateOf("Product Title") }
+  var description by rememberSaveable {
+    mutableStateOf(
+      "Product Description, Product Description, Product Description,\n" +
+        "Product Description, Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,",
+    )
+  }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+  val brochureDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      mediaUris = listOf(uri.toString())
+    }
+  }
+  val brochureCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { didSave ->
+    if (didSave) {
+      val capturedUri = pendingCameraUri?.toString()
+      if (capturedUri != null) {
+        mediaUris = listOf(capturedUri)
+      }
+    } else {
+      pendingCameraUri = null
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding()
+      .padding(horizontal = 16.dp, vertical = 16.dp),
+  ) {
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val header = rememberMenuHeaderSpec(maxWidth, maxHeight)
+    val topContentPadding = if (isPhoneScreen(maxWidth)) maxHeight * 0.12f else 20.dp
+
+    Column(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = topContentPadding, end = header.horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      BrochureScreen(
+        mediaUris = mediaUris,
+        productName = productName,
+        onProductNameChange = { productName = it },
+        description = description,
+        onDescriptionChange = { description = it },
+        contactText = "",
+        onAddImageFromDrive = { brochureDriveLauncher.launch(arrayOf("image/*")) },
+        onAddImageFromCamera = {
+          val outputUri = createCameraImageUri(context)
+          pendingCameraUri = outputUri
+          brochureCameraLauncher.launch(outputUri)
+        },
+        fontFamily = fontFamily,
+        compactScreen = compactScreen,
+        standalonePage = true,
+      )
+    }
+
+    MenuHubHeader(
+      modifier = Modifier
+        .width(header.contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = header.horizontalPadding, top = header.headerTopPadding, end = header.horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = header.actionButtonSize,
+      actionIconSize = header.actionIconSize,
+      actionSpacing = header.actionSpacing,
+      actionTopPadding = header.actionTopPadding,
+    )
+  }
+}
+
+@Composable
+fun ArtProfileScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var productName by rememberSaveable { mutableStateOf("Product Title") }
+  var description by rememberSaveable {
+    mutableStateOf(
+      "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,",
+    )
+  }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+
+  val profileDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      mediaUris = listOf(uri.toString())
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding(),
+  ) {
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topBarTextSize = when {
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val topContentPadding = if (phoneScreen) headerTopPadding + OtcPhoneHeaderLogoHeight + 10.dp else 76.dp
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      BrochureTwoScreen(
+        mediaUris = mediaUris,
+        productName = productName,
+        onProductNameChange = { productName = it },
+        description = description,
+        onDescriptionChange = { description = it },
+        contactText = "",
+        onAddImage = { _ -> profileDriveLauncher.launch(arrayOf("image/*")) },
+        fontFamily = fontFamily,
+        standalonePage = true,
+        showBottomGrid = false,
+      )
+    }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
+  }
+}
+
+@Composable
+fun ArtProPlusScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var productName by rememberSaveable { mutableStateOf("Product Title") }
+  var description by rememberSaveable {
+    mutableStateOf(
+      "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,",
+    )
+  }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var pendingImageSlot by rememberSaveable { mutableIntStateOf(0) }
+  var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+  val proPlusDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      val uriString = uri.toString()
+      val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+        index.takeIf { !isVideoUri(context, existingUri) }
+      }
+      mediaUris = if (pendingImageSlot < imageIndexes.size) {
+        mediaUris.toMutableList().apply {
+          this[imageIndexes[pendingImageSlot]] = uriString
+        }
+      } else {
+        mediaUris + uriString
+      }
+    }
+  }
+  val proPlusCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { didSave ->
+    if (didSave) {
+      val capturedUri = pendingCameraUri?.toString()
+      if (capturedUri != null) {
+        val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+          index.takeIf { !isVideoUri(context, existingUri) }
+        }
+        mediaUris = if (pendingImageSlot < imageIndexes.size) {
+          mediaUris.toMutableList().apply {
+            this[imageIndexes[pendingImageSlot]] = capturedUri
+          }
+        } else {
+          mediaUris + capturedUri
+        }
+      }
+    } else {
+      pendingCameraUri = null
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding(),
+  ) {
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topBarTextSize = when {
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val topContentPadding = if (phoneScreen) headerTopPadding + OtcPhoneHeaderLogoHeight + 10.dp else 76.dp
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      BrochureTwoScreen(
+        mediaUris = mediaUris,
+        productName = productName,
+        onProductNameChange = { productName = it },
+        description = description,
+        onDescriptionChange = { description = it },
+        contactText = "",
+        onAddImage = { slotIndex ->
+          pendingImageSlot = slotIndex
+          proPlusDriveLauncher.launch(arrayOf("image/*"))
+        },
+        onAddImageFromCamera = { slotIndex ->
+          pendingImageSlot = slotIndex
+          val outputUri = createCameraImageUri(context)
+          pendingCameraUri = outputUri
+          proPlusCameraLauncher.launch(outputUri)
+        },
+        fontFamily = fontFamily,
+        standalonePage = true,
+        showBottomGrid = true,
+        showLogo = false,
+        useContainerBackground = false,
+        useUniformImageSizes = true,
+      )
+    }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
+  }
+}
+
+@Composable
+fun ArtCatTwoScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var firstSku by rememberSaveable { mutableStateOf("SKU#") }
+  var secondSku by rememberSaveable { mutableStateOf("SKU#") }
+  var firstTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var secondTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var firstDescription by rememberSaveable {
+    mutableStateOf(
+      "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,",
+    )
+  }
+  var secondDescription by rememberSaveable {
+    mutableStateOf(
+      "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,\n" +
+        "Product Description, Product Description,",
+    )
+  }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var pendingImageSlot by rememberSaveable { mutableIntStateOf(0) }
+  var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+  val catTwoDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      val uriString = uri.toString()
+      val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+        index.takeIf { !isVideoUri(context, existingUri) }
+      }
+      mediaUris = if (pendingImageSlot < imageIndexes.size) {
+        mediaUris.toMutableList().apply {
+          this[imageIndexes[pendingImageSlot]] = uriString
+        }
+      } else {
+        mediaUris + uriString
+      }
+    }
+  }
+  val catTwoCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { didSave ->
+    if (didSave) {
+      val capturedUri = pendingCameraUri?.toString()
+      if (capturedUri != null) {
+        val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+          index.takeIf { !isVideoUri(context, existingUri) }
+        }
+        mediaUris = if (pendingImageSlot < imageIndexes.size) {
+          mediaUris.toMutableList().apply {
+            this[imageIndexes[pendingImageSlot]] = capturedUri
+          }
+        } else {
+          mediaUris + capturedUri
+        }
+      }
+    } else {
+      pendingCameraUri = null
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding(),
+  ) {
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topBarTextSize = when {
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val topContentPadding = if (phoneScreen) headerTopPadding + OtcPhoneHeaderLogoHeight + 10.dp else 76.dp
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      CatTwoScreen(
+        mediaUris = mediaUris,
+        firstSku = firstSku,
+        onFirstSkuChange = { firstSku = it },
+        firstTitle = firstTitle,
+        onFirstTitleChange = { firstTitle = it },
+        firstDescription = firstDescription,
+        onFirstDescriptionChange = { firstDescription = it },
+        secondSku = secondSku,
+        onSecondSkuChange = { secondSku = it },
+        secondTitle = secondTitle,
+        onSecondTitleChange = { secondTitle = it },
+        secondDescription = secondDescription,
+        onSecondDescriptionChange = { secondDescription = it },
+        contactText = "",
+        onAddImage = { slotIndex ->
+          pendingImageSlot = slotIndex
+          catTwoDriveLauncher.launch(arrayOf("image/*"))
+        },
+        onAddImageFromCamera = { slotIndex ->
+          pendingImageSlot = slotIndex
+          val outputUri = createCameraImageUri(context)
+          pendingCameraUri = outputUri
+          catTwoCameraLauncher.launch(outputUri)
+        },
+        fontFamily = fontFamily,
+        showLogo = false,
+      )
+    }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
+  }
+}
+
+@Composable
+fun ArtCatFourScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var firstSku by rememberSaveable { mutableStateOf("SKU#") }
+  var secondSku by rememberSaveable { mutableStateOf("SKU#") }
+  var thirdSku by rememberSaveable { mutableStateOf("SKU#") }
+  var fourthSku by rememberSaveable { mutableStateOf("SKU#") }
+  var firstTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var secondTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var thirdTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var fourthTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var firstDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var secondDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var thirdDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var fourthDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var pendingImageSlot by rememberSaveable { mutableIntStateOf(0) }
+
+  val catFourDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      val uriString = uri.toString()
+      val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+        index.takeIf { !isVideoUri(context, existingUri) }
+      }
+      mediaUris = if (pendingImageSlot < imageIndexes.size) {
+        mediaUris.toMutableList().apply {
+          this[imageIndexes[pendingImageSlot]] = uriString
+        }
+      } else {
+        mediaUris + uriString
+      }
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding(),
+  ) {
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topBarTextSize = when {
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val topContentPadding = if (phoneScreen) headerTopPadding + OtcPhoneHeaderLogoHeight + 10.dp else 76.dp
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      CatCatalogScreen(
+        mediaUris = mediaUris,
+        items = listOf(
+          CatCatalogItemState(firstSku, { firstSku = it }, firstTitle, { firstTitle = it }, firstDescription, { firstDescription = it }, useCameraPlaceholder = true),
+          CatCatalogItemState(secondSku, { secondSku = it }, secondTitle, { secondTitle = it }, secondDescription, { secondDescription = it }, useCameraPlaceholder = true),
+          CatCatalogItemState(thirdSku, { thirdSku = it }, thirdTitle, { thirdTitle = it }, thirdDescription, { thirdDescription = it }, useCameraPlaceholder = true),
+          CatCatalogItemState(fourthSku, { fourthSku = it }, fourthTitle, { fourthTitle = it }, fourthDescription, { fourthDescription = it }, useCameraPlaceholder = true),
+        ),
+        contactText = "",
+        onAddImage = { slotIndex ->
+          pendingImageSlot = slotIndex
+          catFourDriveLauncher.launch(arrayOf("image/*"))
+        },
+        fontFamily = fontFamily,
+        showLogo = false,
+      )
+    }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
+  }
+}
+
+@Composable
+fun ArtCatPlusScreen(
+  onBack: () -> Unit,
+) {
+  val context = LocalContext.current
+  val fontFamily = rememberDashboardFont()
+  var firstSku by rememberSaveable { mutableStateOf("SKU#") }
+  var secondSku by rememberSaveable { mutableStateOf("SKU#") }
+  var thirdSku by rememberSaveable { mutableStateOf("SKU#") }
+  var fourthSku by rememberSaveable { mutableStateOf("SKU#") }
+  var firstTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var secondTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var thirdTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var fourthTitle by rememberSaveable { mutableStateOf("Product Title") }
+  var firstDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var secondDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var thirdDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var fourthDescription by rememberSaveable { mutableStateOf(defaultCatalogDescription()) }
+  var mediaUris by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var pendingImageSlot by rememberSaveable { mutableIntStateOf(0) }
+
+  val catPlusDriveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      val uriString = uri.toString()
+      val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+        index.takeIf { !isVideoUri(context, existingUri) }
+      }
+      mediaUris = if (pendingImageSlot < imageIndexes.size) {
+        mediaUris.toMutableList().apply {
+          this[imageIndexes[pendingImageSlot]] = uriString
+        }
+      } else {
+        mediaUris + uriString
+      }
+    }
+  }
+
+  BackHandler(onBack = onBack)
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Bg)
+      .navigationBarsPadding(),
+  ) {
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topBarTextSize = when {
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val topContentPadding = if (phoneScreen) headerTopPadding + OtcPhoneHeaderLogoHeight + 10.dp else 76.dp
+
+    Column(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp)
+        .verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      CatPlusCatalogScreen(
+        mediaUris = mediaUris,
+        items = listOf(
+          CatCatalogItemState(firstSku, { firstSku = it }, firstTitle, { firstTitle = it }, firstDescription, { firstDescription = it }),
+          CatCatalogItemState(secondSku, { secondSku = it }, secondTitle, { secondTitle = it }, secondDescription, { secondDescription = it }),
+          CatCatalogItemState(thirdSku, { thirdSku = it }, thirdTitle, { thirdTitle = it }, thirdDescription, { thirdDescription = it }),
+          CatCatalogItemState(fourthSku, { fourthSku = it }, fourthTitle, { fourthTitle = it }, fourthDescription, { fourthDescription = it }),
+        ),
+        contactText = "",
+        onAddImage = { slotIndex ->
+          pendingImageSlot = slotIndex
+          catPlusDriveLauncher.launch(arrayOf("image/*"))
+        },
+        fontFamily = fontFamily,
+      )
+    }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
+  }
+}
+
+@Composable
+private fun CatPlusCatalogScreen(
+  mediaUris: List<String>,
+  items: List<CatCatalogItemState>,
+  contactText: String,
+  onAddImage: (Int) -> Unit,
+  fontFamily: FontFamily,
+) {
+  val context = LocalContext.current
+  val images = remember(mediaUris) { mediaUris.filterNot { isVideoUri(context, it) } }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 12.dp, vertical = 12.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+      val tabletLayout = maxWidth >= 760.dp
+      val layoutWidth = if (tabletLayout) minOf(maxWidth * 0.9f, 820.dp) else maxWidth
+
+      Column(
+        modifier = Modifier
+          .width(layoutWidth)
+          .align(Alignment.TopCenter),
+        verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 14.dp else 12.dp),
+      ) {
+        CatTwoHeader(
+          contactText = contactText,
+          fontFamily = fontFamily,
+          tabletLayout = tabletLayout,
+          showLogo = false,
+        )
+        items.forEachIndexed { index, item ->
+          CatPlusItemRow(
+            sku = item.sku,
+            onSkuChange = item.onSkuChange,
+            title = item.title,
+            onTitleChange = item.onTitleChange,
+            description = item.description,
+            onDescriptionChange = item.onDescriptionChange,
+            uriString = images.getOrNull(index),
+            onAddImage = { onAddImage(index) },
+            fontFamily = fontFamily,
+            tabletLayout = tabletLayout,
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CatPlusItemRow(
+  sku: String,
+  onSkuChange: (String) -> Unit,
+  title: String,
+  onTitleChange: (String) -> Unit,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  uriString: String?,
+  onAddImage: () -> Unit,
+  fontFamily: FontFamily,
+  tabletLayout: Boolean,
+) {
+  val imageHeight = if (tabletLayout) 220.dp else 146.dp
+  val skuSize = if (tabletLayout) 12.sp else 9.sp
+  val titleSize = if (tabletLayout) 20.sp else 14.sp
+  val titleLineHeight = if (tabletLayout) 24.sp else 17.sp
+  val descriptionSize = if (tabletLayout) 10.5.sp else 7.5.sp
+  val descriptionLineHeight = if (tabletLayout) 14.sp else 10.sp
+
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 8.dp else 6.dp),
+  ) {
+    TemplateEditableText(
+      value = sku,
+      onValueChange = onSkuChange,
+      placeholder = "SKU#",
+      fontFamily = fontFamily,
+      textAlign = TextAlign.Start,
+      fontSize = skuSize,
+      color = Ink.copy(alpha = 0.72f),
+      lineHeight = skuSize * 1.2f,
+      fontWeight = FontWeight.SemiBold,
+      clearOnFirstFocusValue = "SKU#",
+      widthFraction = 0.18f,
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 12.dp else 10.dp),
+      verticalAlignment = Alignment.Top,
+    ) {
+      BrochureImageContainer(
+        uriString = uriString,
+        onAddImageFromDrive = onAddImage,
+        onAddImageFromCamera = null,
+        modifier = Modifier.weight(0.62f),
+        height = imageHeight,
+        placeholderIcon = Icons.Filled.PhotoCamera,
+        placeholderIconDescription = "Camera",
+        showActionButtons = false,
+        openPickerOnContainerTap = true,
+      )
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 10.dp else 7.dp),
+      ) {
+        TemplateEditableText(
+          value = title,
+          onValueChange = onTitleChange,
+          placeholder = "Product Title",
+          fontFamily = fontFamily,
+          textAlign = TextAlign.Start,
+          fontSize = titleSize,
+          color = Color(0xFF727272),
+          lineHeight = titleLineHeight,
+          fontWeight = FontWeight.SemiBold,
+          clearOnFirstFocusValue = "Product Title",
+        )
+        TemplateEditableText(
+          value = description,
+          onValueChange = onDescriptionChange,
+          placeholder = "Product Description, Product Description, Product Description, Product\nDescription, Product Description, Product Description, Product\nDescription, Product Description, Product Description,",
+          fontFamily = fontFamily,
+          textAlign = TextAlign.Start,
+          fontSize = descriptionSize,
+          color = Ink.copy(alpha = 0.62f),
+          lineHeight = descriptionLineHeight,
+          minLines = 4,
+          fontWeight = FontWeight.Medium,
+          clearPlaceholderOnFocus = true,
+          clearOnFirstFocusValue = defaultCatalogDescription(),
+        )
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 14.dp else 10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          BrochureCircleAction(
+            onClick = {},
+            icon = Icons.Filled.WbSunny,
+            tint = Ink.copy(alpha = 0.38f),
+          )
+          BrochureCircleAction(
+            onClick = {},
+            icon = Icons.Filled.WaterDrop,
+            tint = Ink.copy(alpha = 0.38f),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AddressInfoAction(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  text: String,
+  fontFamily: FontFamily,
+  textSize: TextUnit,
+  onClick: () -> Unit,
+) {
+  Row(
+    modifier = Modifier.clickable(onClick = onClick),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      imageVector = icon,
+      contentDescription = null,
+      tint = Accent,
+      modifier = Modifier.size((textSize.value * 1.2f).dp),
+    )
+    Text(
+      text = text,
+      color = Ink.copy(alpha = 0.56f),
+      textAlign = TextAlign.Center,
+      style = TextStyle(
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = textSize,
+        lineHeight = textSize * 1.02f,
+      ),
+    )
+  }
+}
+
+@Composable
+private fun AddressSocialBadge(
+  label: String,
+  fontFamily: FontFamily = FontFamily.Default,
+  background: Color,
+  size: Dp,
+  onClick: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.size(size),
+    shape = CircleShape,
+    color = background,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+    onClick = onClick,
+  ) {
+    Box(contentAlignment = Alignment.Center) {
+      Text(
+        text = label,
+        color = Color.White,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = (size.value * 0.34f).sp,
+        ),
+      )
+    }
+  }
+}
+
+private fun launchExternalUri(
+  context: android.content.Context,
+  uri: String,
+) {
+  runCatching {
+    context.startActivity(
+      android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+      },
+    )
   }
 }
 
@@ -585,10 +3821,10 @@ fun CategoryScreen(
   var checkoutText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.checkout) }
   var showDetailsPopup by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
   var showDetailsCalendar by rememberSaveable(title.name, initialItemId) { mutableStateOf(false) }
-  var vendorNameText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var vendorPhoneText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var vendorEmailText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
-  var landingPriceText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
+  var vendorNameText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorName) }
+  var vendorPhoneText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorPhone) }
+  var vendorEmailText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.vendorEmail) }
+  var landingPriceText by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.landingPrice) }
   var othersText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
   var markupText by rememberSaveable(title.name, initialItemId) { mutableStateOf("") }
   var selectedDetailsDate by rememberSaveable(title.name, initialItemId) { mutableStateOf(seed.details) }
@@ -617,6 +3853,7 @@ fun CategoryScreen(
   var buildProductQuantityDraft by remember { mutableStateOf("1") }
   var pendingDeleteSelectionId by remember { mutableStateOf<String?>(null) }
   var cameraCapturePendingConfirmation by remember { mutableStateOf(false) }
+  var pendingBrochureImageSlot by remember { mutableIntStateOf(0) }
   val supportsMediaGallery = title != DashboardDestination.OTC
 
   val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -654,6 +3891,28 @@ fun CategoryScreen(
         }
       }
       mediaUris = (mediaUris + uris.map(Uri::toString)).distinct()
+    }
+  }
+  val brochureImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      try {
+        context.contentResolver.takePersistableUriPermission(
+          uri,
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: SecurityException) {
+      }
+      val uriString = uri.toString()
+      val imageIndexes = mediaUris.mapIndexedNotNull { index, existingUri ->
+        index.takeIf { !isVideoUri(context, existingUri) }
+      }
+      mediaUris = if (pendingBrochureImageSlot < imageIndexes.size) {
+        mediaUris.toMutableList().apply {
+          this[imageIndexes[pendingBrochureImageSlot]] = uriString
+        }
+      } else {
+        mediaUris + uriString
+      }
     }
   }
   val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { didSave ->
@@ -724,7 +3983,11 @@ fun CategoryScreen(
         detailsText = detailsText,
         selectedDetailsDate = selectedDetailsDate,
         unitPrice = unitPrice,
+        landingPrice = landingPriceText,
         checkoutDisplay = checkoutDisplay,
+        vendorName = vendorNameText,
+        vendorPhone = vendorPhoneText,
+        vendorEmail = vendorEmailText,
         selectedMediaUris = mediaUris,
         templatePrimaryTitle = mediaPrimaryTitleText,
         templatePrimaryDescription = mediaPrimaryDescriptionText,
@@ -748,7 +4011,11 @@ fun CategoryScreen(
         detailsText = detailsText,
         selectedDetailsDate = selectedDetailsDate,
         unitPrice = unitPrice,
+        landingPrice = landingPriceText,
         checkoutDisplay = checkoutDisplay,
+        vendorName = vendorNameText,
+        vendorPhone = vendorPhoneText,
+        vendorEmail = vendorEmailText,
         selectedMediaUris = mediaUris,
         templatePrimaryTitle = mediaPrimaryTitleText,
         templatePrimaryDescription = mediaPrimaryDescriptionText,
@@ -768,55 +4035,106 @@ fun CategoryScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 32.dp, 784.dp)
+    val configuration = LocalConfiguration.current
+    val physicalTablet = configuration.smallestScreenWidthDp >= 600
+    val phoneScreen = !physicalTablet && isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val tabletScreen = physicalTablet
+    val contentWidth = when {
+      phoneScreen -> maxWidth
+      tabletScreen -> minOf(maxWidth - 48.dp, 760.dp)
+      else -> minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 784.dp)
+    }
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val topContentPadding = when {
+      phoneScreen -> maxHeight * 0.15f
+      tabletScreen -> 120.dp
+      else -> 8.dp
+    }
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
     val circleSize = when {
+      tabletScreen -> minOf(356.dp, maxHeight * 0.30f)
       maxWidth > 1000.dp -> minOf(672.dp, maxHeight * 0.54f)
       maxWidth > 760.dp -> minOf(594.dp, maxHeight * 0.52f)
+      compactScreen -> minOf(contentWidth * 0.82f, maxHeight * 0.33f, 320.dp)
       else -> minOf(contentWidth * 0.96f, maxHeight * 0.48f, 456.dp)
     }
     val statCardHeight = when {
-      maxHeight > 760.dp -> 88.dp
-      maxHeight > 680.dp -> 80.dp
-      else -> 72.dp
+      tabletScreen -> 88.dp
+      compactScreen -> 84.dp
+      maxHeight > 760.dp -> 124.dp
+      maxHeight > 680.dp -> 112.dp
+      else -> 100.dp
     }
     val statValueSize = when {
-      maxHeight > 760.dp -> 34.sp
-      maxHeight > 680.dp -> 31.sp
-      else -> 28.sp
+      tabletScreen -> 28.sp
+      compactScreen -> 33.sp
+      maxHeight > 760.dp -> 51.sp
+      maxHeight > 680.dp -> 46.5.sp
+      else -> 42.sp
     }
     val statValueLineHeight = when {
-      maxHeight > 760.dp -> 38.sp
-      maxHeight > 680.dp -> 35.sp
-      else -> 32.sp
+      tabletScreen -> 32.sp
+      compactScreen -> 36.sp
+      maxHeight > 760.dp -> 57.sp
+      maxHeight > 680.dp -> 52.5.sp
+      else -> 48.sp
     }
-    val statGap = 8.dp
+    val statGap = if (tabletScreen) 6.dp else if (compactScreen) 6.dp else 8.dp
     val topSpacing = when {
-      maxHeight > 780.dp -> 40.dp
-      else -> 20.dp
+      tabletScreen -> 2.dp
+      compactScreen -> 4.dp
+      maxHeight > 780.dp -> 12.dp
+      else -> 8.dp
     }
-    val topBarTextSize = if (maxWidth > 700.dp) 34.sp else 28.sp
-    val topBarMarkSize = if (maxWidth > 700.dp) 76.dp else 60.dp
+    val topBarTextSize = when {
+      tabletScreen -> 30.sp
+      maxWidth > 700.dp -> 34.sp
+      compactScreen -> 22.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 28.sp
+    }
+    val topBarMarkSize = when {
+      tabletScreen -> 68.dp
+      maxWidth > 700.dp -> 76.dp
+      compactScreen -> 46.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 60.dp
+    }
+    val editorTitleSize = when {
+      tabletScreen -> 28.sp
+      compactScreen -> 24.sp
+      phoneScreen -> 28.sp
+      else -> 36.sp
+    }
+    val stockLabelSize = if (phoneScreen) 12.sp else if (tabletScreen) 13.sp else 14.sp
+    val headlineSize = when {
+      tabletScreen -> 36.sp
+      compactScreen -> 42.sp
+      phoneScreen -> 45.sp
+      else -> 54.sp
+    }
 
     Column(
       modifier = Modifier
         .width(contentWidth)
-        .fillMaxSize()
         .align(Alignment.TopCenter)
-        .padding(horizontal = 16.dp, vertical = 8.dp),
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = if (tabletScreen) 0.dp else 8.dp)
+        .then(if (tabletScreen) Modifier else Modifier.verticalScroll(rememberScrollState())),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Spacer(modifier = Modifier.height(topSpacing))
 
-      TopBrandBar(
-        textSize = topBarTextSize,
-        markSize = topBarMarkSize,
-        onBack = { showBackConfirm = true },
-      )
-
-      Spacer(modifier = Modifier.height(20.dp))
-
       Box(
         modifier = Modifier
+          .offset(y = if (tabletScreen) 8.dp else 0.dp)
           .size(circleSize)
           .shadow(
             elevation = 18.dp,
@@ -879,11 +4197,20 @@ fun CategoryScreen(
         }
 
         if (showUploadOptions || selectedMediaUri == null) {
+          val mobileUploadIconSize = if (compactScreen) 24.dp else 26.dp
+          val mobileUploadOptionSize = if (compactScreen) 52.dp else 56.dp
+          val uploadRowWidthFraction = if (phoneScreen) 0.74f else 0.82f
+          val uploadRowHorizontalPadding = if (phoneScreen) 10.dp else if (compactScreen) 16.dp else 24.dp
+          val uploadRowVerticalPadding = if (phoneScreen) 10.dp else if (compactScreen) 16.dp else 24.dp
+          val uploadRowSpacing = if (phoneScreen) 10.dp else if (compactScreen) 12.dp else 18.dp
           Row(
             modifier = Modifier
-              .fillMaxWidth(0.82f)
-              .padding(horizontal = 24.dp, vertical = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
+              .fillMaxWidth(uploadRowWidthFraction)
+              .padding(
+                horizontal = uploadRowHorizontalPadding,
+                vertical = uploadRowVerticalPadding,
+              ),
+            horizontalArrangement = Arrangement.spacedBy(uploadRowSpacing, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
           ) {
             UploadIconOption(
@@ -891,9 +4218,11 @@ fun CategoryScreen(
                 Icon(
                   imageVector = if (cameraCapturePendingConfirmation) Icons.Filled.Check else Icons.Filled.PhotoCamera,
                   contentDescription = if (cameraCapturePendingConfirmation) "Confirm image" else "Camera",
-                  tint = if (cameraCapturePendingConfirmation) Color(0xFF31A853) else Accent,
+                  tint = Color.White,
+                  modifier = Modifier.size(mobileUploadIconSize),
                 )
               },
+              size = mobileUploadOptionSize,
               onClick = {
                 if (cameraCapturePendingConfirmation) {
                   cameraCapturePendingConfirmation = false
@@ -910,9 +4239,11 @@ fun CategoryScreen(
                 Icon(
                   imageVector = Icons.Filled.GridView,
                   contentDescription = "Gallery",
-                  tint = Accent,
+                  tint = Color.White,
+                  modifier = Modifier.size(mobileUploadIconSize),
                 )
               },
+              size = mobileUploadOptionSize,
               onClick = { galleryLauncher.launch("*/*") },
             )
             UploadIconOption(
@@ -920,24 +4251,27 @@ fun CategoryScreen(
                 Icon(
                   imageVector = Icons.Filled.AddToDrive,
                   contentDescription = "Google Drive",
-                  tint = Accent,
+                  tint = Color.White,
+                  modifier = Modifier.size(mobileUploadIconSize),
                 )
               },
+              size = mobileUploadOptionSize,
               onClick = { driveLauncher.launch(arrayOf("image/*", "video/*")) },
             )
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(4.dp))
+      Spacer(modifier = Modifier.height(if (tabletScreen) 14.dp else 4.dp))
 
       InlineEditor(
         value = productName,
         onValueChange = { productName = it },
         fontFamily = dmSansThin,
-        fontSize = 36.sp,
+        fontSize = editorTitleSize,
         textAlign = TextAlign.Center,
         widthFraction = 0.82f,
+        clearOnFirstTap = productName == "Product Name",
       )
 
       Spacer(modifier = Modifier.height(2.dp))
@@ -948,7 +4282,7 @@ fun CategoryScreen(
         style = TextStyle(
           fontFamily = dmSansThin,
           fontWeight = FontWeight.Normal,
-          fontSize = 14.sp,
+          fontSize = stockLabelSize,
         ),
       )
 
@@ -960,12 +4294,12 @@ fun CategoryScreen(
         style = TextStyle(
           fontFamily = dmSansThin,
           fontWeight = FontWeight.Normal,
-          fontSize = 36.sp,
-          lineHeight = 40.sp,
+          fontSize = headlineSize,
+          lineHeight = if (compactScreen) 31.sp else 40.sp,
         ),
       )
 
-      Spacer(modifier = Modifier.height(6.dp))
+      Spacer(modifier = Modifier.height(if (compactScreen) 4.dp else 6.dp))
 
       Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1057,8 +4391,7 @@ fun CategoryScreen(
         }
       }
 
-      Spacer(modifier = Modifier.weight(1f, fill = true))
-      Spacer(modifier = Modifier.height(16.dp))
+      Spacer(modifier = Modifier.height(if (compactScreen) 18.dp else 24.dp))
     }
 
     if (showDetailsPopup) {
@@ -1284,6 +4617,10 @@ fun CategoryScreen(
         onContactTextChange = { mediaContactText = it },
         fontFamily = dmSansThin,
         onAddFromDrive = { mediaPopupDriveLauncher.launch(arrayOf("image/*")) },
+        onAddBrochureImage = { slotIndex ->
+          pendingBrochureImageSlot = slotIndex
+          brochureImageLauncher.launch(arrayOf("image/*"))
+        },
         onClose = { showMediaPopup = false },
       )
     }
@@ -1305,6 +4642,23 @@ fun CategoryScreen(
           .padding(horizontal = 24.dp),
       )
     }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = { showBackConfirm = true },
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = topBarTextSize,
+      logoMarkSize = topBarMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
 
   }
 }
@@ -1335,52 +4689,82 @@ fun InventoryListScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 32.dp, 920.dp)
-    val brandTextSize = if (maxWidth > 700.dp) 46.sp else 36.sp
-    val brandMarkSize = if (maxWidth > 700.dp) 102.dp else 78.dp
-    val inventoryTopSpace = if (maxHeight > 760.dp) 10.dp else 4.dp
-
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
+    val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val topContentPadding = if (phoneScreen) maxHeight * 0.20f else OtcMainContentTopPadding
+    val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val brandTextSize = when {
+      maxWidth > 700.dp -> 46.sp
+      compactScreen -> 28.sp
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      else -> 36.sp
+    }
+    val brandMarkSize = when {
+      maxWidth > 700.dp -> 102.dp
+      compactScreen -> 58.dp
+      phoneScreen -> OtcPhoneHeaderLogoMarkSize
+      else -> 78.dp
+    }
     LazyColumn(
       modifier = Modifier
         .width(contentWidth)
         .fillMaxSize()
         .align(Alignment.TopCenter)
-        .padding(horizontal = 16.dp, vertical = 12.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+        .padding(start = horizontalPadding, top = topContentPadding, end = horizontalPadding, bottom = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(if (compactScreen) 10.dp else 14.dp),
       horizontalAlignment = Alignment.Start,
     ) {
-      item { Spacer(modifier = Modifier.height(inventoryTopSpace)) }
-
       item {
-        InventoryListHeader(
-          textSize = brandTextSize,
-          markSize = brandMarkSize,
-          title = title,
-          itemCount = filteredItems.size,
-          onBack = onBack,
-        )
-      }
+        if (compactScreen) {
+          Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            SearchInventoryField(
+              value = searchQuery,
+              onValueChange = { searchQuery = it },
+              fontFamily = dmSansThin,
+              modifier = Modifier.fillMaxWidth(),
+              placeholder = "Search inventory",
+            )
 
-      item {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(16.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          SearchInventoryField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            fontFamily = dmSansThin,
-            modifier = Modifier.weight(1f),
-            placeholder = "",
-          )
+            AddInventoryButton(
+              fontFamily = dmSansThin,
+              onClick = onAddItem,
+              modifier = Modifier.fillMaxWidth(),
+              label = "Add item",
+            )
+          }
+        } else {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            SearchInventoryField(
+              value = searchQuery,
+              onValueChange = { searchQuery = it },
+              fontFamily = dmSansThin,
+              modifier = Modifier.weight(1f),
+              placeholder = "Search inventory",
+            )
 
-          AddInventoryButton(
-            fontFamily = dmSansThin,
-            onClick = onAddItem,
-            modifier = Modifier.weight(1f),
-            label = "",
-          )
+            AddInventoryButton(
+              fontFamily = dmSansThin,
+              onClick = onAddItem,
+              modifier = Modifier.weight(1f),
+              label = "Add item",
+            )
+          }
         }
       }
 
@@ -1394,15 +4778,15 @@ fun InventoryListScreen(
             shadowElevation = 0.dp,
           ) {
             Text(
-              text = "No items added yet. Tap Add Item to create one.",
+              text = "No items added yet. Start by adding a product to build this inventory list.",
               modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
               textAlign = TextAlign.Center,
               color = Ink.copy(alpha = 0.62f),
               style = TextStyle(
                 fontFamily = dmSansThin,
-                fontWeight = FontWeight.Thin,
-                fontSize = 20.sp,
-                lineHeight = 24.sp,
+                fontWeight = FontWeight.Normal,
+                fontSize = if (compactScreen) 16.sp else 20.sp,
+                lineHeight = if (compactScreen) 20.sp else 24.sp,
               ),
             )
           }
@@ -1430,6 +4814,23 @@ fun InventoryListScreen(
         onDismiss = { pendingDeleteItem = null },
       )
     }
+
+    OtcActionOnlyHeader(
+      modifier = Modifier
+        .width(contentWidth)
+        .align(Alignment.TopCenter)
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
+      onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
+      logoWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      logoHeight = if (phoneScreen) OtcPhoneHeaderLogoHeight else OtcHeaderLogoHeight,
+      logoTextSize = brandTextSize,
+      logoMarkSize = brandMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+    )
   }
 }
 
@@ -1440,6 +4841,7 @@ private fun InventoryListHeader(
   title: DashboardDestination,
   itemCount: Int,
   onBack: () -> Unit,
+  phoneScreen: Boolean = false,
 ) {
   val fontFamily = rememberDashboardFont()
 
@@ -1452,11 +4854,13 @@ private fun InventoryListHeader(
       markSize = markSize,
       onBack = onBack,
       alignStart = true,
-      logoMaxWidth = 260.dp,
-      actionButtonSize = LockedHeaderActionSize,
-      actionIconSize = LockedHeaderIconSize,
-      actionSpacing = LockedHeaderActionSpacing,
+      logoMaxWidth = if (phoneScreen) OtcPhoneHeaderLogoWidth else 260.dp,
+      actionButtonSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize,
+      actionIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize,
+      actionSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing,
       logoTopOffset = LockedHeaderLogoTopOffset,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
+      containerHeight = if (phoneScreen) OtcHeaderFrameHeight else Dp.Unspecified,
     )
 
   }
@@ -1473,6 +4877,7 @@ private fun TopBrandBar(
   actionIconSize: Dp = 24.dp,
   actionSpacing: Dp = 10.dp,
   logoTopOffset: Dp = 0.dp,
+  actionTopPadding: Dp = 0.dp,
   actionBorderColor: Color = Color.Transparent,
   actionBorderWidth: Dp = 0.dp,
   middleAction: (@Composable () -> Unit)? = null,
@@ -1503,7 +4908,9 @@ private fun TopBrandBar(
       )
 
       Column(
-        modifier = Modifier.align(Alignment.TopEnd),
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(top = actionTopPadding),
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(actionSpacing),
       ) {
@@ -1594,6 +5001,12 @@ private fun OtcActionOnlyHeader(
   actionIconSize: Dp = OtcHeaderIconSize,
   actionSpacing: Dp = OtcHeaderActionSpacing,
   containerHeight: Dp = OtcHeaderFrameHeight,
+  logoWidth: Dp = OtcHeaderLogoWidth,
+  logoHeight: Dp = OtcHeaderLogoHeight,
+  logoTextSize: androidx.compose.ui.unit.TextUnit = 30.sp,
+  logoMarkSize: Dp = 60.dp,
+  logoTopOffset: Dp = LockedHeaderLogoTopOffset,
+  actionTopPadding: Dp = 0.dp,
 ) {
   Box(
     modifier = modifier
@@ -1603,14 +5016,17 @@ private fun OtcActionOnlyHeader(
     AshokvatikaLogo(
       modifier = Modifier
         .align(Alignment.TopStart)
-        .width(OtcHeaderLogoWidth),
-      textSize = 30.sp,
-      markSize = 60.dp,
-      fixedHeight = OtcHeaderLogoHeight,
+        .widthIn(max = logoWidth)
+        .offset(y = logoTopOffset),
+      textSize = logoTextSize,
+      markSize = logoMarkSize,
+      fixedHeight = logoHeight,
     )
 
     Column(
-      modifier = Modifier.align(Alignment.TopEnd),
+      modifier = Modifier
+        .align(Alignment.TopEnd)
+        .padding(top = actionTopPadding),
       horizontalAlignment = Alignment.End,
       verticalArrangement = Arrangement.spacedBy(actionSpacing),
     ) {
@@ -1637,11 +5053,11 @@ private fun OtcActionOnlyHeader(
 }
 
 @Composable
-private fun ClosedDealsShortcutIcon() {
+private fun ClosedDealsShortcutIcon(size: Dp = OtcHeaderIconSize) {
   Image(
     painter = painterResource(R.drawable.icon_closed_list),
     contentDescription = null,
-    modifier = Modifier.size(OtcHeaderIconSize),
+    modifier = Modifier.size(size),
   )
 }
 
@@ -1661,39 +5077,50 @@ private fun AddInventoryButton(
   modifier: Modifier = Modifier,
   label: String = "Add items",
 ) {
-  Surface(
-    modifier = modifier.clickable(onClick = onClick),
-    shape = CardShape,
-    color = Accent,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
-  ) {
-    Row(
+  BoxWithConstraints(modifier = modifier) {
+    val compactButton = maxWidth < 220.dp
+    Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 22.dp, vertical = 18.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-      if (label.isNotBlank()) {
-        Text(
-          text = label,
-          color = Color.White,
-          style = TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = 24.sp,
-          ),
+        .shadow(
+          elevation = 8.dp,
+          shape = CardShape,
+          ambientColor = SoftGreyShadow,
+          spotColor = SoftGreyShadow,
         )
-      } else {
-        Spacer(modifier = Modifier.width(1.dp))
+        .clickable(onClick = onClick),
+      shape = CardShape,
+      color = AccentGreen,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = if (compactButton) 16.dp else 22.dp, vertical = if (compactButton) 14.dp else 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        if (label.isNotBlank()) {
+          Text(
+            text = label,
+            color = Color.White,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = if (compactButton) 18.sp else 24.sp,
+            ),
+          )
+        } else {
+          Spacer(modifier = Modifier.width(1.dp))
+        }
+        Icon(
+          imageVector = Icons.Filled.Add,
+          contentDescription = "Add item",
+          tint = Color.White,
+          modifier = Modifier.size(if (compactButton) 24.dp else 28.dp),
+        )
       }
-      Icon(
-        imageVector = Icons.Filled.Add,
-        contentDescription = "Add item",
-        tint = Color.White,
-        modifier = Modifier.size(28.dp),
-      )
     }
   }
 }
@@ -1706,54 +5133,65 @@ private fun SearchInventoryField(
   modifier: Modifier = Modifier,
   placeholder: String = "Search items",
 ) {
-  Surface(
-    modifier = modifier,
-    shape = CardShape,
-    color = Accent,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
-  ) {
-    Row(
+  BoxWithConstraints(modifier = modifier) {
+    val compactField = maxWidth < 240.dp
+    Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 22.dp, vertical = 15.dp),
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Icon(
-        imageVector = Icons.Filled.Search,
-        contentDescription = "Search items",
-        tint = Color.White,
-        modifier = Modifier.size(26.dp),
-      )
-
-      BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        cursorBrush = SolidColor(Color.White),
-        textStyle = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 24.sp,
-          color = Color.White,
+        .shadow(
+          elevation = 8.dp,
+          shape = CardShape,
+          ambientColor = SoftGreyShadow,
+          spotColor = SoftGreyShadow,
         ),
-        decorationBox = { innerTextField ->
-          if (value.isBlank() && placeholder.isNotBlank()) {
-            Text(
-              text = placeholder,
-              color = Color.White.copy(alpha = 0.92f),
-              style = TextStyle(
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 24.sp,
-              ),
-            )
-          }
-          innerTextField()
-        },
-      )
+      shape = CardShape,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = if (compactField) 16.dp else 22.dp, vertical = if (compactField) 12.dp else 15.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compactField) 10.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(
+          imageVector = Icons.Filled.Search,
+          contentDescription = "Search items",
+          tint = Accent,
+          modifier = Modifier.size(if (compactField) 22.dp else 26.dp),
+        )
+
+        BasicTextField(
+          value = value,
+          onValueChange = onValueChange,
+          modifier = Modifier.fillMaxWidth(),
+          singleLine = true,
+          cursorBrush = SolidColor(Accent),
+          textStyle = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactField) 18.sp else 24.sp,
+            color = Ink,
+          ),
+          decorationBox = { innerTextField ->
+            if (value.isBlank() && placeholder.isNotBlank()) {
+              Text(
+                text = placeholder,
+                color = Ink.copy(alpha = 0.42f),
+                style = TextStyle(
+                  fontFamily = fontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = if (compactField) 18.sp else 24.sp,
+                ),
+              )
+            }
+            innerTextField()
+          },
+        )
+      }
     }
   }
 }
@@ -1775,13 +5213,21 @@ private fun InventoryItemCard(
   val scope = rememberCoroutineScope()
   var dragConsumed by remember(item.id) { mutableStateOf(false) }
 
-  Box(
+  BoxWithConstraints(
     modifier = Modifier.fillMaxWidth(),
   ) {
+    val compactCard = maxWidth < 380.dp
+    val imageHeight = if (compactCard) 112.dp else 146.dp
+    val rowPadding = if (compactCard) 12.dp else 18.dp
+    val spacing = if (compactCard) 12.dp else 18.dp
+    val nameSize = if (compactCard) 20.sp else 26.sp
+    val statusSize = if (compactCard) 16.sp else 20.sp
+    val stockSize = if (compactCard) 28.sp else 38.sp
+
     Surface(
       modifier = Modifier.matchParentSize(),
       shape = CardShape,
-      color = Color(0xFFF8D9CC),
+      color = Color(0xFFF1E4D6),
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {}
@@ -1790,13 +5236,13 @@ private fun InventoryItemCard(
       modifier = Modifier
         .fillMaxWidth()
         .offset { IntOffset(swipeOffset.value.toInt(), 0) }
-        .shadow(
-          elevation = 10.dp,
+      .shadow(
+          elevation = 14.dp,
           shape = CardShape,
           ambientColor = SoftGreyShadow,
           spotColor = SoftGreyShadow,
         )
-        .pointerInput(item.id) {
+      .pointerInput(item.id) {
           detectHorizontalDragGestures(
             onDragStart = {
               dragConsumed = false
@@ -1838,13 +5284,13 @@ private fun InventoryItemCard(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 18.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+          .padding(horizontal = rowPadding, vertical = if (compactCard) 12.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(spacing),
         verticalAlignment = Alignment.Top,
       ) {
         Box(
           modifier = Modifier
-            .height(146.dp)
+            .height(imageHeight)
             .aspectRatio(0.68f)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
             .background(Color(0xFFF3F3F3), androidx.compose.foundation.shape.RoundedCornerShape(24.dp)),
@@ -1881,13 +5327,13 @@ private fun InventoryItemCard(
             style = TextStyle(
               fontFamily = fontFamily,
               fontWeight = FontWeight.Normal,
-              fontSize = 26.sp,
-              lineHeight = 28.sp,
+              fontSize = nameSize,
+              lineHeight = if (compactCard) 22.sp else 28.sp,
             ),
           )
           Row(
             verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compactCard) 8.dp else 10.dp),
           ) {
             Text(
               text = if (inStock) "In-stock" else "Out of stock",
@@ -1895,7 +5341,7 @@ private fun InventoryItemCard(
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Normal,
-                fontSize = 20.sp,
+                fontSize = statusSize,
               ),
             )
             Text(
@@ -1904,18 +5350,18 @@ private fun InventoryItemCard(
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Thin,
-                fontSize = 38.sp,
-                lineHeight = 38.sp,
+                fontSize = stockSize,
+                lineHeight = if (compactCard) 30.sp else 38.sp,
               ),
             )
           }
           Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compactCard) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            InventoryMetricPill("Batch", batchValue.toString(), fontFamily)
-            InventoryMetricPill("Sale", saleValue.toString(), fontFamily)
-            InventoryMetricPill("Rent", rentValue.toString(), fontFamily)
+            InventoryMetricPill("Batch", batchValue.toString(), fontFamily, compactCard)
+            InventoryMetricPill("Sale", saleValue.toString(), fontFamily, compactCard)
+            InventoryMetricPill("Rent", rentValue.toString(), fontFamily, compactCard)
           }
           if (item.status == "incomplete") {
             Text(
@@ -1939,6 +5385,7 @@ private fun InventoryMetricPill(
   label: String,
   value: String,
   fontFamily: FontFamily,
+  compact: Boolean = false,
 ) {
   Surface(
     shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
@@ -1947,7 +5394,7 @@ private fun InventoryMetricPill(
     shadowElevation = 0.dp,
   ) {
     Column(
-      modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+      modifier = Modifier.padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 6.dp else 8.dp),
       horizontalAlignment = Alignment.Start,
       verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -1957,7 +5404,7 @@ private fun InventoryMetricPill(
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Normal,
-          fontSize = 12.sp,
+          fontSize = if (compact) 10.sp else 12.sp,
         ),
       )
       Text(
@@ -1966,8 +5413,8 @@ private fun InventoryMetricPill(
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Normal,
-          fontSize = 16.sp,
-          lineHeight = 16.sp,
+          fontSize = if (compact) 13.sp else 16.sp,
+          lineHeight = if (compact) 14.sp else 16.sp,
         ),
       )
     }
@@ -2152,181 +5599,536 @@ fun OtcScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
-    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = when {
+      phoneScreen -> OtcPhoneHeaderHorizontalPadding
+      maxWidth > 700.dp -> OtcHeaderHorizontalPadding
+      compactScreen -> 8.dp
+      else -> 12.dp
+    }
+    val headerActionSize = when {
+      phoneScreen -> OtcPhoneHeaderActionSize
+      compactScreen -> 42.dp
+      else -> OtcHeaderActionSize
+    }
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else OtcHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else if (compactScreen) 12.dp else OtcHeaderActionSpacing
+    val headerContainerHeight = when {
+      phoneScreen -> OtcHeaderFrameHeight
+      compactScreen -> 122.dp
+      else -> OtcHeaderFrameHeight
+    }
+    val headerLogoWidth = when {
+      phoneScreen -> OtcPhoneHeaderLogoWidth
+      compactScreen -> 220.dp
+      else -> OtcHeaderLogoWidth
+    }
+    val headerLogoHeight = when {
+      phoneScreen -> OtcPhoneHeaderLogoHeight
+      compactScreen -> 82.dp
+      else -> OtcHeaderLogoHeight
+    }
+    val headerLogoTextSize = when {
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      compactScreen -> 22.sp
+      else -> 30.sp
+    }
+    val headerLogoMarkSize = if (phoneScreen) OtcPhoneHeaderLogoMarkSize else 60.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val contentTopPadding = if (phoneScreen) {
+      // Keep phone content closer to the header than the original layout, but leave
+      // enough breathing room so the price block and floating add button do not crowd
+      // the action rail.
+      headerTopPadding + headerLogoHeight + OtcPhoneContentTopGap + OtcPhoneStickyBlockTopOffset
+    } else {
+      headerTopPadding + headerContainerHeight + 10.dp
+    }
     val amountSize = when {
       maxWidth > 1000.dp -> 60.sp
       maxWidth > 700.dp -> 48.sp
+      compactScreen -> 28.sp
+      phoneScreen -> 21.33.sp
       else -> 40.sp
     }
     val mrpLabelSize = when {
       maxWidth > 1000.dp -> 13.sp
       maxWidth > 700.dp -> 11.sp
+      compactScreen -> 8.sp
+      phoneScreen -> 6.sp
       else -> 9.sp
     }
-    val thumbnailSize = minOf((contentWidth - 20.dp) / 6.4f, if (maxWidth > 700.dp) 52.dp else 40.dp)
+    val mobileRowContentWidth = contentWidth - (horizontalPadding * 2f)
+    val thumbnailSize = minOf((contentWidth - 16.dp) / 5f, if (maxWidth > 700.dp) 52.dp else if (compactScreen) 34.dp else 34.dp)
     val carouselCardWidth = when {
       maxWidth > 1200.dp -> 194.dp
       maxWidth > 900.dp -> 176.dp
       maxWidth > 700.dp -> 156.dp
+      phoneScreen -> ((mobileRowContentWidth - 8.dp) / 3f)
+      compactScreen -> 136.dp
       else -> minOf(contentWidth * 0.39f, 140.dp)
     }
     val carouselCardHeight = when {
-      maxHeight > 900.dp -> 186.dp
-      maxHeight > 760.dp -> 156.dp
-      else -> 132.dp
+      maxHeight > 900.dp -> 210.dp
+      maxHeight > 760.dp -> 176.dp
+      phoneScreen -> (((mobileRowContentWidth - 8.dp) / 3f) * 1.36f)
+      compactScreen -> 136.dp
+      else -> 152.dp
     }
     val carouselPhotoSize = when {
       maxHeight > 900.dp -> 100.dp
       maxHeight > 760.dp -> 84.dp
+      phoneScreen -> ((((mobileRowContentWidth - 8.dp) / 3f) * 1.2f) * 0.6f)
+      compactScreen -> 50.dp
       else -> 66.dp
     }
     val sectionGap = when {
       maxHeight > 900.dp -> 8.dp
       maxHeight > 720.dp -> 6.dp
+      phoneScreen -> 2.dp
+      compactScreen -> 4.dp
       else -> 4.dp
     }
-    val titleAssetSize = if (maxHeight > 760.dp) 30.dp else 24.dp
+    val titleAssetSize = when {
+      maxHeight > 760.dp -> 30.dp
+      phoneScreen -> 12.dp
+      compactScreen -> 16.dp
+      else -> 24.dp
+    }
+    val columnLogoSize = when {
+      maxHeight > 760.dp -> 34.dp
+      phoneScreen -> 16.dp
+      compactScreen -> 18.dp
+      else -> 28.dp
+    }
     val visibleSelectionSlots = if (maxWidth > 700.dp) 6 else 5
-    Column(
+    val selectionRowSpacing = if (phoneScreen) 8.dp else 8.dp
+    val staticPlusButtonSize = if (phoneScreen) 38.dp else headerActionSize
+    val staticPlusButtonFootprint = if (phoneScreen) 80.dp else staticPlusButtonSize
+    val selectionRowEndInset = if (phoneScreen) staticPlusButtonFootprint + selectionRowSpacing else 0.dp
+    val sectionRowSpacing = if (phoneScreen) 6.dp else 12.dp
+    val cardHorizontalPadding = if (phoneScreen) 2.dp else 8.dp
+    val cardVerticalPadding = if (phoneScreen) 2.dp else 8.dp
+    val cardNameSize = if (phoneScreen) 12.sp else 13.sp
+    val cardNameLineHeight = if (phoneScreen) 13.sp else 15.sp
+    val cardPriceSize = if (phoneScreen) 20.sp else 24.sp
+    val cardPriceLineHeight = if (phoneScreen) 22.sp else 26.sp
+    val columnGap = if (phoneScreen) 4.dp else 12.dp
+    val availableColumnsWidth = contentWidth - (horizontalPadding * 2f)
+    val productColumnWidth = (availableColumnsWidth - (columnGap * 2f)) / 3f
+    val productCardWidth = productColumnWidth
+    val productCardHeight = when {
+      phoneScreen -> productCardWidth * 1.56f
+      compactScreen -> 152.dp
+      else -> maxOf(carouselCardHeight, productCardWidth * 1.42f)
+    }
+    val productPhotoSize = when {
+      phoneScreen -> minOf(productCardWidth * 0.82f, productCardHeight * 0.5f)
+      compactScreen -> minOf(productCardWidth * 0.66f, 54.dp)
+      else -> minOf(productCardWidth * 0.6f, carouselPhotoSize)
+    }
+    val plantItems = catalog.filter { it.category == OtcCarouselCategory.Plant }
+    val potItems = catalog.filter { it.category == OtcCarouselCategory.Pots }
+    val supplyItems = catalog.filter { it.category == OtcCarouselCategory.Supplies }
+    var stickyBlockHeightPx by remember { mutableIntStateOf(0) }
+    val stickyBlockHeight = with(LocalDensity.current) { stickyBlockHeightPx.toDp() }
+    val productColumnsTopPadding = if (phoneScreen) {
+      (contentTopPadding + stickyBlockHeight - staticPlusButtonFootprint - 8.dp)
+        .coerceAtLeast(contentTopPadding)
+    } else {
+      contentTopPadding + stickyBlockHeight + sectionGap
+    }
+
+    Box(
       modifier = Modifier
         .width(contentWidth)
-        .fillMaxSize()
-        .align(Alignment.TopCenter)
-        .padding(
-          start = horizontalPadding,
-          top = OtcMainContentTopPadding,
-          end = horizontalPadding,
-          bottom = OtcPageVerticalPadding,
-        ),
-      horizontalAlignment = Alignment.Start,
+        .fillMaxHeight()
+        .align(Alignment.TopCenter),
     ) {
-      MrpEditor(
-        totalAmount = totalAmount,
-        landingTotal = landingTotal,
-        fontFamily = dmSansThin,
-        labelSize = mrpLabelSize,
-        amountSize = amountSize,
-        onAddToCart = {
-          if (selectedCartItems.isNotEmpty()) {
-            onAddToCart(selectedCartItems)
-            quantities.clear()
-            activeItemId = null
-            draftQuantity = "1"
-          }
-        },
-        addEnabled = selectedCartItems.isNotEmpty(),
-        leftAligned = true,
-      )
-
-      Spacer(modifier = Modifier.height(sectionGap))
-
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        repeat(maxOf(visibleSelectionSlots, selectedItems.size)) { index ->
-          OtcSelectionThumbnail(
-            item = selectedItems.getOrNull(index),
-            size = thumbnailSize,
+      if (phoneScreen) {
+        Row(
+          modifier = Modifier
+              .fillMaxSize()
+              .padding(
+                start = horizontalPadding,
+                top = productColumnsTopPadding,
+                end = horizontalPadding,
+                bottom = OtcPageVerticalPadding,
+              ),
+          horizontalArrangement = Arrangement.spacedBy(columnGap),
+          verticalAlignment = Alignment.Top,
+        ) {
+          OtcProductColumn(
+            modifier = Modifier.weight(1f),
+            items = plantItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
             fontFamily = dmSansThin,
-            onDelete = { item -> quantities.remove(item.id) },
+            cardWidth = productCardWidth,
+            cardHeight = productCardHeight,
+            photoSize = productPhotoSize,
+            horizontalPadding = cardHorizontalPadding,
+            verticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            rowSpacing = sectionRowSpacing,
+          )
+          OtcProductColumn(
+            modifier = Modifier.weight(1f),
+            items = potItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = dmSansThin,
+            cardWidth = productCardWidth,
+            cardHeight = productCardHeight,
+            photoSize = productPhotoSize,
+            horizontalPadding = cardHorizontalPadding,
+            verticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            rowSpacing = sectionRowSpacing,
+          )
+          OtcProductColumn(
+            modifier = Modifier.weight(1f),
+            items = supplyItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = dmSansThin,
+            cardWidth = productCardWidth,
+            cardHeight = productCardHeight,
+            photoSize = productPhotoSize,
+            horizontalPadding = cardHorizontalPadding,
+            verticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            rowSpacing = sectionRowSpacing,
+          )
+        }
+
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .zIndex(1f)
+            .background(Bg)
+            .onSizeChanged { stickyBlockHeightPx = it.height }
+              .padding(
+                start = horizontalPadding,
+                top = contentTopPadding,
+                end = horizontalPadding,
+                bottom = 0.dp,
+              ),
+          horizontalAlignment = Alignment.Start,
+        ) {
+          MrpEditor(
+            totalAmount = totalAmount,
+            landingTotal = landingTotal,
+            fontFamily = dmSansThin,
+            labelSize = mrpLabelSize,
+            amountSize = amountSize,
+            actionButtonSize = headerActionSize,
+            centerActionWithAmount = true,
+            topAlignAction = true,
+            showAction = false,
+            onAddToCart = {
+              if (selectedCartItems.isNotEmpty()) {
+                onAddToCart(selectedCartItems)
+                quantities.clear()
+                activeItemId = null
+                draftQuantity = "1"
+              }
+            },
+            addEnabled = selectedCartItems.isNotEmpty(),
+            leftAligned = true,
+          )
+
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = if (phoneScreen) 12.dp else 8.dp),
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = if (phoneScreen) 4.dp else 0.dp)
+                .padding(end = selectionRowEndInset)
+                .horizontalScroll(rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(selectionRowSpacing, Alignment.Start),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              repeat(maxOf(visibleSelectionSlots, selectedItems.size)) { index ->
+                OtcSelectionThumbnail(
+                  item = selectedItems.getOrNull(index),
+                  size = thumbnailSize,
+                  fontFamily = dmSansThin,
+                  onDelete = { item -> quantities.remove(item.id) },
+                )
+              }
+            }
+
+            Image(
+              painter = painterResource(R.drawable.plus_button),
+              contentDescription = "Add to Cart",
+              modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .zIndex(1f)
+                .size(staticPlusButtonSize)
+                .alpha(if (selectedCartItems.isNotEmpty()) 1f else 0.4f)
+                .clickable(
+                  enabled = selectedCartItems.isNotEmpty(),
+                  onClick = {
+                    onAddToCart(selectedCartItems)
+                    quantities.clear()
+                    activeItemId = null
+                    draftQuantity = "1"
+                  },
+                ),
+            )
+          }
+
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = if (phoneScreen) 10.dp else 2.dp, bottom = if (phoneScreen) 6.dp else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(columnGap),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            OtcColumnLogo(
+              modifier = Modifier.weight(1f),
+              imageRes = R.drawable.otc_title_plants,
+              imageSize = columnLogoSize,
+            )
+            OtcColumnLogo(
+              modifier = Modifier.weight(1f),
+              imageRes = R.drawable.otc_title_pots,
+              imageSize = columnLogoSize,
+            )
+            OtcColumnLogo(
+              modifier = Modifier.weight(1f),
+              imageRes = R.drawable.otc_title_supplies,
+              imageSize = columnLogoSize,
+            )
+          }
+        }
+
+        if (activeItem != null) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .align(Alignment.TopCenter)
+              .padding(top = contentTopPadding + stickyBlockHeight + 12.dp)
+              .zIndex(2f),
+          ) {
+            OtcQuantityPopup(
+              item = activeItem,
+              quantity = draftQuantity,
+              onQuantityChange = { draftQuantity = it.filter(Char::isDigit) },
+              onDecrease = {
+                val next = ((draftQuantity.toIntOrNull() ?: 1) - 1).coerceAtLeast(1)
+                draftQuantity = next.toString()
+              },
+              onIncrease = {
+                val next = ((draftQuantity.toIntOrNull() ?: 1) + 1).coerceAtMost(99)
+                draftQuantity = next.toString()
+              },
+              onConfirm = {
+                quantities[activeItem.id] = (draftQuantity.toIntOrNull() ?: 1).coerceAtLeast(1)
+                activeItemId = null
+              },
+              onClose = { activeItemId = null },
+              fontFamily = dmSansThin,
+              imageSize = carouselPhotoSize * 2f,
+            )
+          }
+        }
+      } else {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(
+              start = horizontalPadding,
+              top = contentTopPadding,
+              end = horizontalPadding,
+              bottom = OtcPageVerticalPadding,
+            ),
+          verticalArrangement = Arrangement.spacedBy(sectionGap),
+        ) {
+          MrpEditor(
+            totalAmount = totalAmount,
+            landingTotal = landingTotal,
+            fontFamily = dmSansThin,
+            labelSize = mrpLabelSize,
+            amountSize = amountSize,
+            actionButtonSize = headerActionSize,
+            centerActionWithAmount = false,
+            topAlignAction = false,
+            showAction = true,
+            onAddToCart = {
+              if (selectedCartItems.isNotEmpty()) {
+                onAddToCart(selectedCartItems)
+                quantities.clear()
+                activeItemId = null
+                draftQuantity = "1"
+              }
+            },
+            addEnabled = selectedCartItems.isNotEmpty(),
+            leftAligned = true,
+          )
+
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(selectionRowSpacing, Alignment.Start),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            repeat(maxOf(visibleSelectionSlots, selectedItems.size)) { index ->
+              OtcSelectionThumbnail(
+                item = selectedItems.getOrNull(index),
+                size = thumbnailSize,
+                fontFamily = dmSansThin,
+                onDelete = { item -> quantities.remove(item.id) },
+              )
+            }
+          }
+
+          if (activeItem != null) {
+            OtcQuantityPopup(
+              item = activeItem,
+              quantity = draftQuantity,
+              onQuantityChange = { draftQuantity = it.filter(Char::isDigit) },
+              onDecrease = {
+                val next = ((draftQuantity.toIntOrNull() ?: 1) - 1).coerceAtLeast(1)
+                draftQuantity = next.toString()
+              },
+              onIncrease = {
+                val next = ((draftQuantity.toIntOrNull() ?: 1) + 1).coerceAtMost(99)
+                draftQuantity = next.toString()
+              },
+              onConfirm = {
+                quantities[activeItem.id] = (draftQuantity.toIntOrNull() ?: 1).coerceAtLeast(1)
+                activeItemId = null
+              },
+              onClose = { activeItemId = null },
+              fontFamily = dmSansThin,
+              imageSize = carouselPhotoSize * 2f,
+            )
+          }
+
+          OtcCarouselSection(
+            title = "Plant",
+            titleImageRes = R.drawable.otc_title_plants,
+            titleImageSize = titleAssetSize,
+            items = plantItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = dmSansThin,
+            cardWidth = carouselCardWidth,
+            cardHeight = carouselCardHeight,
+            photoSize = carouselPhotoSize,
+            rowSpacing = sectionRowSpacing,
+            cardHorizontalPadding = cardHorizontalPadding,
+            cardVerticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            stackCards = false,
+            mobileCardLayout = false,
+          )
+          OtcCarouselSection(
+            title = "Pots",
+            titleImageRes = R.drawable.otc_title_pots,
+            titleImageSize = titleAssetSize,
+            items = potItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = dmSansThin,
+            cardWidth = carouselCardWidth,
+            cardHeight = carouselCardHeight,
+            photoSize = carouselPhotoSize,
+            rowSpacing = sectionRowSpacing,
+            cardHorizontalPadding = cardHorizontalPadding,
+            cardVerticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            stackCards = false,
+            mobileCardLayout = false,
+          )
+          OtcCarouselSection(
+            title = "Supplies",
+            titleImageRes = R.drawable.otc_title_supplies,
+            titleImageSize = titleAssetSize,
+            items = supplyItems,
+            selectedIds = selectedIds,
+            onItemTap = { item ->
+              activeItemId = item.id
+              draftQuantity = (quantities[item.id] ?: 1).toString()
+            },
+            fontFamily = dmSansThin,
+            cardWidth = carouselCardWidth,
+            cardHeight = carouselCardHeight,
+            photoSize = carouselPhotoSize,
+            rowSpacing = sectionRowSpacing,
+            cardHorizontalPadding = cardHorizontalPadding,
+            cardVerticalPadding = cardVerticalPadding,
+            nameFontSize = cardNameSize,
+            nameLineHeight = cardNameLineHeight,
+            priceFontSize = cardPriceSize,
+            priceLineHeight = cardPriceLineHeight,
+            stackCards = false,
+            mobileCardLayout = false,
           )
         }
       }
-
-      Spacer(modifier = Modifier.height(sectionGap))
-
-      if (activeItem != null) {
-        OtcQuantityPopup(
-          item = activeItem,
-          quantity = draftQuantity,
-          onQuantityChange = { draftQuantity = it.filter(Char::isDigit).ifBlank { "1" } },
-          onDecrease = {
-            val next = ((draftQuantity.toIntOrNull() ?: 1) - 1).coerceAtLeast(1)
-            draftQuantity = next.toString()
-          },
-          onIncrease = {
-            val next = ((draftQuantity.toIntOrNull() ?: 1) + 1).coerceAtMost(99)
-            draftQuantity = next.toString()
-          },
-          onConfirm = {
-            quantities[activeItem.id] = (draftQuantity.toIntOrNull() ?: 1).coerceAtLeast(1)
-            activeItemId = null
-          },
-          onClose = { activeItemId = null },
-          fontFamily = dmSansThin,
-          imageSize = carouselPhotoSize * 2f,
-        )
-
-        Spacer(modifier = Modifier.height(sectionGap))
-      }
-
-      OtcCarouselSection(
-        title = "Plant",
-        titleImageRes = R.drawable.otc_title_plants,
-        titleImageSize = titleAssetSize,
-        items = catalog.filter { it.category == OtcCarouselCategory.Plant },
-        selectedIds = selectedIds,
-        onItemTap = { item ->
-          activeItemId = item.id
-          draftQuantity = (quantities[item.id] ?: 1).toString()
-        },
-        fontFamily = dmSansThin,
-        cardWidth = carouselCardWidth,
-        cardHeight = carouselCardHeight,
-        photoSize = carouselPhotoSize,
-      )
-
-      Spacer(modifier = Modifier.height(sectionGap))
-
-      OtcCarouselSection(
-        title = "Pots",
-        titleImageRes = R.drawable.otc_title_pots,
-        titleImageSize = titleAssetSize,
-        items = catalog.filter { it.category == OtcCarouselCategory.Pots },
-        selectedIds = selectedIds,
-        onItemTap = { item ->
-          activeItemId = item.id
-          draftQuantity = (quantities[item.id] ?: 1).toString()
-        },
-        fontFamily = dmSansThin,
-        cardWidth = carouselCardWidth,
-        cardHeight = carouselCardHeight,
-        photoSize = carouselPhotoSize,
-      )
-
-      Spacer(modifier = Modifier.height(sectionGap))
-
-      OtcCarouselSection(
-        title = "Supplies",
-        titleImageRes = R.drawable.otc_title_supplies,
-        titleImageSize = titleAssetSize,
-        items = catalog.filter { it.category == OtcCarouselCategory.Supplies },
-        selectedIds = selectedIds,
-        onItemTap = { item ->
-          activeItemId = item.id
-          draftQuantity = (quantities[item.id] ?: 1).toString()
-        },
-        fontFamily = dmSansThin,
-        cardWidth = carouselCardWidth,
-        cardHeight = carouselCardHeight,
-        photoSize = carouselPhotoSize,
-      )
     }
 
     OtcActionOnlyHeader(
       modifier = Modifier
         .width(contentWidth)
         .align(Alignment.TopCenter)
-        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
       onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = headerContainerHeight,
+      logoWidth = headerLogoWidth,
+      logoHeight = headerLogoHeight,
+      logoTextSize = headerLogoTextSize,
+      logoMarkSize = headerLogoMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
       middleAction = {
         CircleIconAction(
-          size = OtcHeaderActionSize,
+          size = headerActionSize,
           borderColor = Accent,
           borderWidth = 2.dp,
           icon = {
@@ -2337,18 +6139,18 @@ fun OtcScreen(
                 style = TextStyle(
                   fontFamily = dmSansThin,
                   fontWeight = FontWeight.Normal,
-                  fontSize = 20.sp,
+                  fontSize = 13.33.sp,
                 ),
               )
             } else {
               Box(
-                modifier = Modifier.size(OtcCartIconSize),
+                modifier = Modifier.size(headerIconSize),
                 contentAlignment = Alignment.Center,
               ) {
                 Image(
                   painter = painterResource(R.drawable.wheelbarrow),
                   contentDescription = "Open cart",
-                  modifier = Modifier.size(OtcCartIconSize),
+                  modifier = Modifier.size(headerIconSize),
                 )
               }
             }
@@ -2358,17 +6160,81 @@ fun OtcScreen(
       },
       bottomAction = {
         CircleIconAction(
-          size = OtcHeaderActionSize,
+          size = headerActionSize,
           borderColor = Accent,
           borderWidth = 2.dp,
           icon = {
-            ClosedDealsShortcutIcon()
+            ClosedDealsShortcutIcon(size = headerIconSize)
           },
           onClick = onOpenSavedDeals,
         )
       },
     )
+  }
+}
 
+@Composable
+private fun OtcColumnLogo(
+  modifier: Modifier = Modifier,
+  imageRes: Int,
+  imageSize: Dp,
+) {
+  Box(
+    modifier = modifier,
+    contentAlignment = Alignment.Center,
+  ) {
+    Image(
+      painter = painterResource(imageRes),
+      contentDescription = null,
+      contentScale = ContentScale.Fit,
+      modifier = Modifier.size(imageSize),
+    )
+  }
+}
+
+@Composable
+private fun OtcProductColumn(
+  modifier: Modifier = Modifier,
+  items: List<OtcCarouselItem>,
+  selectedIds: Set<String>,
+  onItemTap: (OtcCarouselItem) -> Unit,
+  fontFamily: FontFamily,
+  cardWidth: Dp,
+  cardHeight: Dp,
+  photoSize: Dp,
+  horizontalPadding: Dp,
+  verticalPadding: Dp,
+  nameFontSize: androidx.compose.ui.unit.TextUnit,
+  nameLineHeight: androidx.compose.ui.unit.TextUnit,
+  priceFontSize: androidx.compose.ui.unit.TextUnit,
+  priceLineHeight: androidx.compose.ui.unit.TextUnit,
+  rowSpacing: Dp,
+) {
+  val listState = rememberLazyListState()
+  LazyColumn(
+    modifier = modifier.fillMaxHeight(),
+    state = listState,
+    verticalArrangement = Arrangement.spacedBy(rowSpacing),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    items(items, key = { it.id }) { item ->
+      OtcCarouselCard(
+        item = item,
+        selected = item.id in selectedIds,
+        onTap = { onItemTap(item) },
+        fontFamily = fontFamily,
+        cardWidth = cardWidth,
+        cardHeight = cardHeight,
+        photoSize = photoSize,
+        horizontalPadding = horizontalPadding,
+        verticalPadding = verticalPadding,
+        nameFontSize = nameFontSize,
+        nameLineHeight = nameLineHeight,
+        priceFontSize = priceFontSize,
+        priceLineHeight = priceLineHeight,
+        mobileCardLayout = true,
+      )
+    }
   }
 }
 
@@ -2381,12 +6247,20 @@ private fun MrpEditor(
   amountSize: androidx.compose.ui.unit.TextUnit,
   onAddToCart: () -> Unit,
   addEnabled: Boolean,
+  actionButtonSize: Dp = OtcHeaderActionSize,
+  centerActionWithAmount: Boolean = false,
   leftAligned: Boolean = false,
+  topAlignAction: Boolean = false,
+  showAction: Boolean = true,
 ) {
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(14.dp),
-    verticalAlignment = Alignment.Bottom,
+    verticalAlignment = when {
+      topAlignAction -> Alignment.Top
+      centerActionWithAmount -> Alignment.CenterVertically
+      else -> Alignment.Bottom
+    },
   ) {
     Column(
       modifier = Modifier.weight(1f),
@@ -2415,14 +6289,16 @@ private fun MrpEditor(
       )
     }
 
-    Image(
-      painter = painterResource(R.drawable.plus_button),
-      contentDescription = "Add to Cart",
-      modifier = Modifier
-        .size(OtcHeaderActionSize)
-        .alpha(if (addEnabled) 1f else 0.4f)
-        .clickable(enabled = addEnabled, onClick = onAddToCart),
-    )
+    if (showAction) {
+      Image(
+        painter = painterResource(R.drawable.plus_button),
+        contentDescription = "Add to Cart",
+        modifier = Modifier
+          .size(actionButtonSize)
+          .alpha(if (addEnabled) 1f else 0.4f)
+          .clickable(enabled = addEnabled, onClick = onAddToCart),
+      )
+    }
   }
 }
 
@@ -2438,10 +6314,10 @@ private fun OtcQuantityPopup(
   fontFamily: FontFamily,
   imageSize: Dp,
 ) {
-  var showQuantityKeypad by remember(item.id) { mutableStateOf(false) }
   val imageBitmap by rememberDecodedImage(item.imageUri)
+  var clearedInitialQuantity by remember(item.id) { mutableStateOf(false) }
 
-  Surface(
+  BoxWithConstraints(
     modifier = Modifier
       .fillMaxWidth()
       .shadow(
@@ -2450,171 +6326,186 @@ private fun OtcQuantityPopup(
         ambientColor = SoftGreyShadow,
         spotColor = SoftGreyShadow,
       ),
-    shape = CardShape,
-    color = Color.White,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
   ) {
-    Column(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(horizontal = 12.dp, vertical = 10.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+    val previewSize = minOf(maxWidth * 0.52f, imageSize * 1.32f, 240.dp)
+    Surface(
+      shape = CardShape,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
       ) {
-        Box(
-          modifier = Modifier
-            .size(imageSize)
-            .background(Accent, CircleShape)
-            .clip(CircleShape),
-          contentAlignment = Alignment.Center,
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(18.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          if (imageBitmap != null) {
-            Image(
-              bitmap = imageBitmap!!,
-              contentDescription = item.name,
-              contentScale = ContentScale.Crop,
-              modifier = Modifier.fillMaxSize(),
-            )
-          } else {
+          Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(previewSize)
+                .background(Accent, CircleShape)
+                .clip(CircleShape),
+              contentAlignment = Alignment.Center,
+            ) {
+              if (imageBitmap != null) {
+                Image(
+                  bitmap = imageBitmap!!,
+                  contentDescription = item.name,
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.fillMaxSize(),
+                )
+              } else {
+                Text(
+                  text = item.shortName,
+                  color = Color.White,
+                  textAlign = TextAlign.Center,
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Thin,
+                    fontSize = minOf(previewSize.value * 0.22f, 28f).sp,
+                    lineHeight = minOf(previewSize.value * 0.25f, 32f).sp,
+                  ),
+                )
+              }
+            }
+
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              QuantityButton(
+                text = "−",
+                onClick = onDecrease,
+                fontFamily = fontFamily,
+              )
+
+              Box(
+                modifier = Modifier
+                  .width(116.dp)
+                  .height(58.dp)
+                  .background(Color(0xFFF7F7F7), CardShape)
+                  .border(1.dp, Accent.copy(alpha = 0.24f), CardShape),
+                contentAlignment = Alignment.Center,
+              ) {
+                BasicTextField(
+                  value = quantity,
+                  onValueChange = { updated ->
+                    onQuantityChange(updated.filter(Char::isDigit).take(4))
+                  },
+                  singleLine = true,
+                  textStyle = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Thin,
+                    fontSize = 30.sp,
+                    lineHeight = 32.sp,
+                    color = Ink,
+                    textAlign = TextAlign.Center,
+                  ),
+                  keyboardOptions = KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                  ),
+                  keyboardActions = KeyboardActions(
+                    onDone = { onConfirm() },
+                  ),
+                  cursorBrush = SolidColor(Ink),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focusState ->
+                      if (focusState.isFocused && !clearedInitialQuantity && quantity == "1") {
+                        clearedInitialQuantity = true
+                        onQuantityChange("")
+                      }
+                    },
+                  decorationBox = { innerTextField ->
+                    Box(
+                      modifier = Modifier.fillMaxWidth(),
+                      contentAlignment = Alignment.Center,
+                    ) {
+                      innerTextField()
+                    }
+                  },
+                )
+              }
+
+              QuantityButton(
+                text = "+",
+                onClick = onIncrease,
+                fontFamily = fontFamily,
+              )
+            }
+
             Text(
-              text = item.shortName,
-              color = Color.White,
+              text = item.name,
+              color = Ink,
+              textAlign = TextAlign.Center,
+              maxLines = 2,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = 24.sp,
+                lineHeight = 27.sp,
+              ),
+            )
+
+            Text(
+              text = "\u20B9 ${item.price}",
+              color = Ink,
               textAlign = TextAlign.Center,
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Thin,
-                fontSize = minOf(imageSize.value * 0.22f, 24f).sp,
-                lineHeight = minOf(imageSize.value * 0.25f, 28f).sp,
+                fontSize = 34.sp,
+                lineHeight = 38.sp,
               ),
             )
           }
-        }
 
-        Column(
-          modifier = Modifier
-            .weight(1f)
-            .padding(horizontal = 12.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-          Text(
-            text = item.name,
-            color = Ink,
-            maxLines = 1,
-            style = TextStyle(
-              fontFamily = fontFamily,
-              fontWeight = FontWeight.Normal,
-              fontSize = 24.sp,
-              lineHeight = 26.sp,
-            ),
-          )
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+          Column(
+            modifier = Modifier
+              .fillMaxHeight()
+              .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally,
           ) {
-            Box(
-              modifier = Modifier
-                .width(86.dp)
-                .height(58.dp)
-                .background(Color(0xFFF7F7F7), CardShape)
-                .border(1.dp, Accent.copy(alpha = 0.24f), CardShape)
-                .clickable { showQuantityKeypad = true },
-              contentAlignment = Alignment.Center,
-            ) {
-              Text(
-                text = quantity,
-                color = Ink,
-                textAlign = TextAlign.Center,
-                style = TextStyle(
-                  fontFamily = fontFamily,
-                  fontWeight = FontWeight.Thin,
-                  fontSize = 30.sp,
-                  lineHeight = 32.sp,
-                ),
-              )
-            }
-
-            Column(
-              verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-              Text(
-        text = "\u20B9 ${item.price}",
-                color = Ink,
-                style = TextStyle(
-                  fontFamily = fontFamily,
-                  fontWeight = FontWeight.Thin,
-                  fontSize = 54.sp,
-                  lineHeight = 58.sp,
-                ),
-              )
-              Text(
-                text = "\u20B9 " + item.landingPrice,
-                color = Color(0xFFB8B8B8),
-                style = TextStyle(
-                  fontFamily = fontFamily,
-                  fontWeight = FontWeight.Normal,
-                  fontSize = 18.sp,
-                  lineHeight = 20.sp,
-                ),
-              )
-            }
+            CircleIconAction(
+              size = 46.dp,
+              icon = {
+                Icon(
+                  imageVector = Icons.Filled.Close,
+                  contentDescription = "Close",
+                  tint = Accent,
+                )
+              },
+              onClick = onClose,
+            )
+            CircleIconAction(
+              size = 46.dp,
+              icon = {
+                Icon(
+                  imageVector = Icons.Filled.Check,
+                  contentDescription = "Confirm quantity",
+                  tint = Color(0xFF31A853),
+                )
+              },
+              onClick = onConfirm,
+            )
           }
         }
-
-        Column(
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-          CircleIconAction(
-            size = 42.dp,
-            icon = {
-              Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Close",
-                tint = Accent,
-              )
-            },
-            onClick = onClose,
-          )
-          CircleIconAction(
-            size = 42.dp,
-            icon = {
-              Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = "Confirm quantity",
-                tint = Color(0xFF31A853),
-              )
-            },
-            onClick = {
-              showQuantityKeypad = false
-              onConfirm()
-            },
-          )
-        }
-      }
-
-      if (showQuantityKeypad) {
-        NumericKeypad(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(CardShape),
-          onDigit = { digit ->
-            val currentValue = quantity.takeIf { it != "0" }.orEmpty()
-            onQuantityChange((currentValue + digit.toString()).take(2).ifBlank { "0" })
-          },
-          onBackspace = {
-            onQuantityChange(quantity.dropLast(1).ifBlank { "0" })
-          },
-          onConfirm = { showQuantityKeypad = false },
-        )
       }
     }
+
   }
 }
 
@@ -2715,10 +6606,22 @@ private fun OtcCarouselSection(
   cardWidth: Dp,
   cardHeight: Dp,
   photoSize: Dp,
+  titleGap: Dp = 6.dp,
+  rowSpacing: Dp = 12.dp,
+  cardHorizontalPadding: Dp = 8.dp,
+  cardVerticalPadding: Dp = 8.dp,
+  nameFontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+  nameLineHeight: androidx.compose.ui.unit.TextUnit = 15.sp,
+  priceFontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
+  priceLineHeight: androidx.compose.ui.unit.TextUnit = 26.sp,
+  lockToVisibleRow: Boolean = false,
+  stackCards: Boolean = true,
+  mobileCardLayout: Boolean = true,
 ) {
+  val visibleItems = items
   Column(
     modifier = modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(titleGap),
   ) {
     if (titleImageRes != null) {
       Image(
@@ -2741,23 +6644,57 @@ private fun OtcCarouselSection(
       )
     }
 
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .horizontalScroll(rememberScrollState()),
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
-      verticalAlignment = Alignment.Top,
-    ) {
-      items.forEach { item ->
-        OtcCarouselCard(
-          item = item,
-          selected = item.id in selectedIds,
-          onTap = { onItemTap(item) },
-          fontFamily = fontFamily,
-          cardWidth = cardWidth,
-          cardHeight = cardHeight,
-          photoSize = photoSize,
-        )
+    if (stackCards) {
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(rowSpacing),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        visibleItems.forEach { item ->
+          OtcCarouselCard(
+            item = item,
+            selected = item.id in selectedIds,
+            onTap = { onItemTap(item) },
+            fontFamily = fontFamily,
+            cardWidth = cardWidth,
+            cardHeight = cardHeight,
+            photoSize = photoSize,
+            horizontalPadding = cardHorizontalPadding,
+            verticalPadding = cardVerticalPadding,
+            nameFontSize = nameFontSize,
+            nameLineHeight = nameLineHeight,
+            priceFontSize = priceFontSize,
+            priceLineHeight = priceLineHeight,
+            mobileCardLayout = mobileCardLayout,
+          )
+        }
+      }
+    } else {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing, Alignment.Start),
+        verticalAlignment = Alignment.Top,
+      ) {
+        visibleItems.forEach { item ->
+          OtcCarouselCard(
+            item = item,
+            selected = item.id in selectedIds,
+            onTap = { onItemTap(item) },
+            fontFamily = fontFamily,
+            cardWidth = cardWidth,
+            cardHeight = cardHeight,
+            photoSize = photoSize,
+            horizontalPadding = cardHorizontalPadding,
+            verticalPadding = cardVerticalPadding,
+            nameFontSize = nameFontSize,
+            nameLineHeight = nameLineHeight,
+            priceFontSize = priceFontSize,
+            priceLineHeight = priceLineHeight,
+            mobileCardLayout = mobileCardLayout,
+          )
+        }
       }
     }
   }
@@ -2772,6 +6709,13 @@ private fun OtcCarouselCard(
   cardWidth: Dp,
   cardHeight: Dp,
   photoSize: Dp,
+  horizontalPadding: Dp = 8.dp,
+  verticalPadding: Dp = 8.dp,
+  nameFontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+  nameLineHeight: androidx.compose.ui.unit.TextUnit = 15.sp,
+  priceFontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
+  priceLineHeight: androidx.compose.ui.unit.TextUnit = 26.sp,
+  mobileCardLayout: Boolean = true,
 ) {
   val imageBitmap by rememberDecodedImage(item.imageUri)
   Surface(
@@ -2789,68 +6733,149 @@ private fun OtcCarouselCard(
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(horizontal = 8.dp, vertical = 8.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.SpaceBetween,
-    ) {
-      Box(
+    if (mobileCardLayout) {
+      Column(
         modifier = Modifier
-          .size(photoSize)
-          .background(Accent.copy(alpha = if (selected) 1f else 0.82f), CircleShape)
-          .clip(CircleShape),
-        contentAlignment = Alignment.Center,
+          .fillMaxSize()
+          .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top,
       ) {
-        if (imageBitmap != null) {
-          Image(
-            bitmap = imageBitmap!!,
-            contentDescription = item.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-          )
-        } else {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(
+          modifier = Modifier
+            .size(photoSize)
+            .background(Accent.copy(alpha = if (selected) 1f else 0.82f), CircleShape)
+            .clip(CircleShape),
+          contentAlignment = Alignment.Center,
+        ) {
+          if (imageBitmap != null) {
+            Image(
+              bitmap = imageBitmap!!,
+              contentDescription = item.name,
+              contentScale = ContentScale.Crop,
+              modifier = Modifier.fillMaxSize(),
+            )
+          } else {
+            Text(
+              text = item.shortName,
+              color = Color.White,
+              textAlign = TextAlign.Center,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Thin,
+                fontSize = minOf(photoSize.value * 0.22f, 14f).sp,
+                lineHeight = minOf(photoSize.value * 0.24f, 16f).sp,
+              ),
+            )
+          }
+        }
+
+      Spacer(modifier = Modifier.height(4.dp))
+
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f, fill = true)
+            .padding(bottom = 8.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Bottom,
+        ) {
           Text(
-            text = item.shortName,
-            color = Color.White,
+            text = item.name,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = nameFontSize,
+              lineHeight = nameLineHeight,
+              color = Ink,
+            ),
+          )
+
+          Spacer(modifier = Modifier.height(4.dp))
+
+          Text(
+            text = "\u20B9 ${item.price}",
+            modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
             style = TextStyle(
               fontFamily = fontFamily,
               fontWeight = FontWeight.Thin,
-              fontSize = minOf(photoSize.value * 0.22f, 14f).sp,
-              lineHeight = minOf(photoSize.value * 0.24f, 16f).sp,
+              fontSize = priceFontSize,
+              lineHeight = priceLineHeight,
+              color = Ink,
             ),
           )
         }
       }
+    } else {
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Box(
+          modifier = Modifier
+            .size(photoSize)
+            .background(Accent.copy(alpha = if (selected) 1f else 0.82f), CircleShape)
+            .clip(CircleShape),
+          contentAlignment = Alignment.Center,
+        ) {
+          if (imageBitmap != null) {
+            Image(
+              bitmap = imageBitmap!!,
+              contentDescription = item.name,
+              contentScale = ContentScale.Crop,
+              modifier = Modifier.fillMaxSize(),
+            )
+          } else {
+            Text(
+              text = item.shortName,
+              color = Color.White,
+              textAlign = TextAlign.Center,
+              style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Thin,
+                fontSize = minOf(photoSize.value * 0.22f, 14f).sp,
+                lineHeight = minOf(photoSize.value * 0.24f, 16f).sp,
+              ),
+            )
+          }
+        }
 
-      Text(
-        text = item.name,
-        modifier = Modifier.fillMaxWidth(),
-        textAlign = TextAlign.Center,
-        maxLines = 1,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 13.sp,
-          lineHeight = 15.sp,
-          color = Ink,
-        ),
-      )
+        Text(
+          text = item.name,
+          modifier = Modifier.fillMaxWidth(),
+          textAlign = TextAlign.Center,
+          maxLines = 1,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = nameFontSize,
+            lineHeight = nameLineHeight,
+            color = Ink,
+          ),
+        )
 
-      Text(
-        text = "\u20B9 ${item.price}",
-        modifier = Modifier.fillMaxWidth(),
-        textAlign = TextAlign.Center,
-        style = TextStyle(
-          fontFamily = fontFamily,
-          fontWeight = FontWeight.Thin,
-          fontSize = 24.sp,
-          lineHeight = 26.sp,
-          color = Ink,
-        ),
-      )
+        Text(
+          text = "\u20B9 ${item.price}",
+          modifier = Modifier.fillMaxWidth(),
+          textAlign = TextAlign.Center,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Thin,
+            fontSize = priceFontSize,
+            lineHeight = priceLineHeight,
+            color = Ink,
+          ),
+        )
+      }
     }
   }
 }
@@ -2858,10 +6883,14 @@ private fun OtcCarouselCard(
 @Composable
 fun OpenCartScreen(
   rows: List<OpenCartRow>,
+  liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
+  liveSyncMessage: String?,
   clientName: String,
   clientPhone: String,
   clientId: String,
   transactionCode: String,
+  nextSavedDealOrdinal: Int,
   onClientNameChange: (String) -> Unit,
   onClientPhoneChange: (String) -> Unit,
   onClientIdChange: (String) -> Unit,
@@ -2875,16 +6904,51 @@ fun OpenCartScreen(
   onDeleteItem: (String, String) -> Unit,
   onDeleteRow: (String) -> Unit,
   onClearCart: () -> Unit,
-  onSaveDeal: () -> Unit,
+  onAddProductToLiveCart: (LiveCustomerSession, InventoryItem) -> Unit,
+  onSaveDeal: (SavedDeal) -> Unit,
 ) {
   val fontFamily = rememberDashboardFont()
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
   var activeEditor by remember { mutableStateOf<Pair<String, CartProductItem>?>(null) }
   var rowItemPickerId by remember { mutableStateOf<String?>(null) }
   var rowCheckoutId by remember { mutableStateOf<String?>(null) }
   var pendingDeleteRowId by remember { mutableStateOf<String?>(null) }
   var showClearCartConfirm by remember { mutableStateOf(false) }
   var showPaymentGateway by remember { mutableStateOf(false) }
+  var pendingInvoiceExport by remember { mutableStateOf<PendingInvoiceExport?>(null) }
   val totalMrp = rows.sumOf { row -> row.displayAmount() }
+  val invoiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+    val export = pendingInvoiceExport
+    pendingInvoiceExport = null
+    if (export == null) {
+      return@rememberLauncherForActivityResult
+    }
+    scope.launch {
+      val saved = if (uri == null) {
+        false
+      } else {
+        withContext(Dispatchers.IO) {
+          runCatching {
+            context.contentResolver.openOutputStream(uri, "rwt")?.use { stream ->
+              stream.write(export.pdfBytes)
+              stream.flush()
+            } != null
+          }.getOrDefault(false)
+        }
+      }
+      Toast.makeText(
+        context,
+        when {
+          uri == null -> "Deal saved. Invoice download was skipped."
+          saved -> "Invoice downloaded successfully."
+          else -> "Deal saved, but invoice download failed."
+        },
+        Toast.LENGTH_SHORT,
+      ).show()
+      onOpenSavedDeals()
+    }
+  }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -2892,8 +6956,49 @@ fun OpenCartScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
-    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = when {
+      phoneScreen -> OtcPhoneHeaderHorizontalPadding
+      maxWidth > 700.dp -> OtcHeaderHorizontalPadding
+      compactScreen -> 8.dp
+      else -> 12.dp
+    }
+    val headerActionSize = when {
+      phoneScreen -> OtcPhoneHeaderActionSize
+      compactScreen -> 42.dp
+      else -> OtcHeaderActionSize
+    }
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else OtcHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else if (compactScreen) 12.dp else OtcHeaderActionSpacing
+    val headerContainerHeight = when {
+      phoneScreen -> OtcHeaderFrameHeight
+      compactScreen -> 122.dp
+      else -> OtcHeaderFrameHeight
+    }
+    val headerLogoWidth = when {
+      phoneScreen -> OtcPhoneHeaderLogoWidth
+      compactScreen -> 220.dp
+      else -> OtcHeaderLogoWidth
+    }
+    val headerLogoHeight = when {
+      phoneScreen -> OtcPhoneHeaderLogoHeight
+      compactScreen -> 82.dp
+      else -> OtcHeaderLogoHeight
+    }
+    val headerLogoTextSize = when {
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      compactScreen -> 22.sp
+      else -> 30.sp
+    }
+    val headerLogoMarkSize = if (phoneScreen) OtcPhoneHeaderLogoMarkSize else 60.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val contentTopPadding = headerTopPadding + headerContainerHeight + if (compactScreen) 2.dp else 12.dp
     Column(
       modifier = Modifier
         .width(contentWidth)
@@ -2901,7 +7006,7 @@ fun OpenCartScreen(
         .align(Alignment.TopCenter)
         .padding(
           start = horizontalPadding,
-          top = OtcOpenCartContentTopPadding,
+          top = contentTopPadding,
           end = horizontalPadding,
           bottom = OtcPageVerticalPadding,
         ),
@@ -2946,14 +7051,14 @@ fun OpenCartScreen(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         LabeledReadOnlyCard(
-          label = "",
+          label = "Cart total",
           value = "\u20B9 ${formatAmount(totalMrp)}",
           fontFamily = fontFamily,
           modifier = Modifier.weight(1f),
           valueFontSize = 48.sp,
         )
         ActionButtonCard(
-          title = "Proceed to Payment",
+          title = "Review Payment",
           color = AccentGreen,
           fontFamily = fontFamily,
           onClick = { showPaymentGateway = true },
@@ -2968,6 +7073,18 @@ fun OpenCartScreen(
           .fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
+        item {
+          OpenCartLiveSessionsSection(
+            liveSessions = liveSessions,
+            inventoryItems = inventoryItems,
+            syncMessage = liveSyncMessage,
+            fontFamily = fontFamily,
+            compactScreen = compactScreen,
+            phoneScreen = phoneScreen,
+            onAddProductToCart = onAddProductToLiveCart,
+          )
+        }
+
         if (rows.isEmpty()) {
           item {
             EmptyStateCard(
@@ -3060,9 +7177,18 @@ fun OpenCartScreen(
       modifier = Modifier
         .width(contentWidth)
         .align(Alignment.TopCenter)
-        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
       onBack = onBack,
       onOpenSavedDeals = onOpenSavedDeals,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = headerContainerHeight,
+      logoWidth = headerLogoWidth,
+      logoHeight = headerLogoHeight,
+      logoTextSize = headerLogoTextSize,
+      logoMarkSize = headerLogoMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
     )
 
     if (showPaymentGateway) {
@@ -3077,11 +7203,151 @@ fun OpenCartScreen(
         onOpenCart = {
           showPaymentGateway = false
         },
+        onOpenSavedDeals = {
+          showPaymentGateway = false
+          onOpenSavedDeals()
+        },
         onCloseDealAndClearCart = {
           showPaymentGateway = false
-          onSaveDeal()
+          if (rows.isNotEmpty()) {
+            val closedDeal = SavedDeal(
+              id = "saved-deal-${System.currentTimeMillis()}",
+              title = rows.firstOrNull()?.title?.takeIf { it.isNotBlank() } ?: "Deal $nextSavedDealOrdinal",
+              clientName = clientName,
+              clientPhone = clientPhone,
+              clientId = clientId,
+              transactionCode = transactionCode,
+              rows = rows.map { row -> row.copy(items = row.items.toList()) },
+            )
+            onSaveDeal(closedDeal)
+            runCatching {
+              PendingInvoiceExport(
+                fileName = buildInvoiceFileName(closedDeal),
+                pdfBytes = buildInvoicePdf(context, closedDeal),
+              )
+            }.onSuccess { export ->
+              pendingInvoiceExport = export
+              invoiceLauncher.launch(export.fileName)
+            }.onFailure {
+              Toast.makeText(context, "Deal saved, but invoice generation failed.", Toast.LENGTH_SHORT).show()
+              onOpenSavedDeals()
+            }
+          }
         },
       )
+    }
+  }
+}
+
+@Composable
+private fun OpenCartLiveSessionsSection(
+  liveSessions: List<LiveCustomerSession>,
+  inventoryItems: List<InventoryItem>,
+  syncMessage: String?,
+  fontFamily: FontFamily,
+  compactScreen: Boolean,
+  phoneScreen: Boolean,
+  onAddProductToCart: (LiveCustomerSession, InventoryItem) -> Unit,
+) {
+  val sortedSessions = liveSessions.sortedWith(
+    compareByDescending<LiveCustomerSession> { session -> session.isLoggedIn }
+      .thenByDescending { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+      .thenBy { session -> session.customerName.lowercase(Locale.US) },
+  )
+  val activeSessions = sortedSessions.count { session -> session.isLoggedIn }
+  val plantsInCarts = sortedSessions.sumOf { session ->
+    session.cartItems.sumOf { item -> item.quantity.coerceAtLeast(1) }
+  }
+  val latestSync = sortedSessions
+    .maxByOrNull { session -> parseLiveUiTimestampMillis(session.updatedAt) ?: 0L }
+    ?.updatedAt
+
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = CardShape,
+      color = Color.White,
+      tonalElevation = 0.dp,
+      shadowElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Text(
+          text = "Live customer sessions",
+          color = Ink,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 28.sp else 32.sp,
+          ),
+        )
+        Text(
+          text = "Track who is logged in on the customer app, how long the session has been active, and which plants are sitting in the cart.",
+          color = Ink.copy(alpha = 0.68f),
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = if (compactScreen) 15.sp else 17.sp,
+            lineHeight = if (compactScreen) 20.sp else 22.sp,
+          ),
+        )
+        if (!syncMessage.isNullOrBlank() || !latestSync.isNullOrBlank()) {
+          Text(
+            text = syncMessage ?: "Last synced ${formatLiveUiTimestamp(latestSync)}",
+            color = if (!syncMessage.isNullOrBlank()) Accent else AccentGreen,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = if (compactScreen) 14.sp else 15.sp,
+            ),
+          )
+        }
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      LiveSummaryCard(
+        modifier = Modifier.weight(1f),
+        title = "Active now",
+        value = activeSessions.toString(),
+        caption = if (activeSessions == 1) "customer logged in" else "customers logged in",
+        fontFamily = fontFamily,
+        compactScreen = compactScreen,
+      )
+      LiveSummaryCard(
+        modifier = Modifier.weight(1f),
+        title = "Plants in carts",
+        value = plantsInCarts.toString(),
+        caption = if (plantsInCarts == 1) "plant selected" else "plants selected",
+        fontFamily = fontFamily,
+        compactScreen = compactScreen,
+      )
+    }
+
+    if (sortedSessions.isEmpty()) {
+      EmptyStateCard(
+        text = "Waiting for customer app sync. Logged-in customer sessions will appear here inside the inventory cart.",
+        fontFamily = fontFamily,
+      )
+    } else {
+      sortedSessions.forEach { session ->
+        LiveSessionCard(
+          session = session,
+          inventoryItems = inventoryItems,
+          fontFamily = fontFamily,
+          compactScreen = compactScreen,
+          phoneScreen = phoneScreen,
+          onAddProductToCart = onAddProductToCart,
+        )
+      }
     }
   }
 }
@@ -3122,8 +7388,53 @@ fun SavedDealsScreen(
       .background(Bg)
       .navigationBarsPadding(),
   ) {
-    val contentWidth = minOf(maxWidth - 28.dp, 980.dp)
-    val horizontalPadding = if (maxWidth > 700.dp) OtcHeaderHorizontalPadding else 12.dp
+    val phoneScreen = isPhoneScreen(maxWidth)
+    val compactScreen = isCompactPhoneScreen(maxWidth, maxHeight)
+    val statusBarTopPaddingPx = ViewCompat.getRootWindowInsets(LocalView.current)
+      ?.getInsets(WindowInsetsCompat.Type.statusBars())
+      ?.top ?: 0
+    val statusBarTopPadding = with(LocalDensity.current) { statusBarTopPaddingPx.toDp() }
+    val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - 28.dp, 980.dp)
+    val horizontalPadding = when {
+      phoneScreen -> OtcPhoneHeaderHorizontalPadding
+      maxWidth > 700.dp -> OtcHeaderHorizontalPadding
+      compactScreen -> 8.dp
+      else -> 12.dp
+    }
+    val headerActionSize = when {
+      phoneScreen -> OtcPhoneHeaderActionSize
+      compactScreen -> 42.dp
+      else -> OtcHeaderActionSize
+    }
+    val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else OtcHeaderIconSize
+    val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else if (compactScreen) 12.dp else OtcHeaderActionSpacing
+    val headerContainerHeight = when {
+      phoneScreen -> OtcHeaderFrameHeight
+      compactScreen -> 122.dp
+      else -> OtcHeaderFrameHeight
+    }
+    val headerLogoWidth = when {
+      phoneScreen -> OtcPhoneHeaderLogoWidth
+      compactScreen -> 220.dp
+      else -> OtcHeaderLogoWidth
+    }
+    val headerLogoHeight = when {
+      phoneScreen -> OtcPhoneHeaderLogoHeight
+      compactScreen -> 82.dp
+      else -> OtcHeaderLogoHeight
+    }
+    val headerLogoTextSize = when {
+      phoneScreen -> OtcPhoneHeaderLogoTextSize
+      compactScreen -> 22.sp
+      else -> 30.sp
+    }
+    val headerLogoMarkSize = if (phoneScreen) OtcPhoneHeaderLogoMarkSize else 60.dp
+    val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
+    val contentTopPadding = if (phoneScreen) {
+      headerTopPadding + 82.dp
+    } else {
+      headerTopPadding + headerContainerHeight + if (compactScreen) 4.dp else 14.dp
+    }
     LazyColumn(
       modifier = Modifier
         .width(contentWidth)
@@ -3131,18 +7442,18 @@ fun SavedDealsScreen(
         .align(Alignment.TopCenter)
         .padding(
           start = horizontalPadding,
-          top = OtcClosedContentTopPadding,
+          top = contentTopPadding,
           end = horizontalPadding,
           bottom = OtcPageVerticalPadding,
         ),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+      verticalArrangement = Arrangement.spacedBy(if (compactScreen) 10.dp else 14.dp),
     ) {
       item {
         SearchInventoryField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
           fontFamily = fontFamily,
-          placeholder = "",
+          placeholder = "Search closed deals",
         )
       }
 
@@ -3169,8 +7480,17 @@ fun SavedDealsScreen(
       modifier = Modifier
         .width(contentWidth)
         .align(Alignment.TopCenter)
-        .padding(start = horizontalPadding, top = OtcHeaderTopOffset, end = horizontalPadding),
+        .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
       onBack = onBack,
+      actionButtonSize = headerActionSize,
+      actionIconSize = headerIconSize,
+      actionSpacing = headerSpacing,
+      containerHeight = headerContainerHeight,
+      logoWidth = headerLogoWidth,
+      logoHeight = headerLogoHeight,
+      logoTextSize = headerLogoTextSize,
+      logoMarkSize = headerLogoMarkSize,
+      actionTopPadding = if (phoneScreen) OtcPhoneHeaderActionTopPadding else 0.dp,
     )
   }
 }
@@ -3180,17 +7500,35 @@ private fun OpenCartHeader(
   modifier: Modifier = Modifier,
   onBack: () -> Unit,
   onOpenSavedDeals: () -> Unit,
+  actionButtonSize: Dp = OtcHeaderActionSize,
+  actionIconSize: Dp = OtcHeaderIconSize,
+  actionSpacing: Dp = OtcHeaderActionSpacing,
+  containerHeight: Dp = OtcHeaderFrameHeight,
+  logoWidth: Dp = OtcHeaderLogoWidth,
+  logoHeight: Dp = OtcHeaderLogoHeight,
+  logoTextSize: androidx.compose.ui.unit.TextUnit = 30.sp,
+  logoMarkSize: Dp = 60.dp,
+  actionTopPadding: Dp = 0.dp,
 ) {
   OtcActionOnlyHeader(
     modifier = modifier,
     onBack = onBack,
+    actionButtonSize = actionButtonSize,
+    actionIconSize = actionIconSize,
+    actionSpacing = actionSpacing,
+    containerHeight = containerHeight,
+    logoWidth = logoWidth,
+    logoHeight = logoHeight,
+    logoTextSize = logoTextSize,
+    logoMarkSize = logoMarkSize,
+    actionTopPadding = actionTopPadding,
     middleAction = {
       CircleIconAction(
-        size = OtcHeaderActionSize,
+        size = actionButtonSize,
         borderColor = Accent,
         borderWidth = 2.dp,
         icon = {
-          ClosedDealsShortcutIcon()
+          ClosedDealsShortcutIcon(actionIconSize)
         },
         onClick = onOpenSavedDeals,
       )
@@ -3424,10 +7762,28 @@ private fun OpenCartRowItemPickerDialog(
 private fun SavedDealsHeader(
   modifier: Modifier = Modifier,
   onBack: () -> Unit,
+  actionButtonSize: Dp = OtcHeaderActionSize,
+  actionIconSize: Dp = OtcHeaderIconSize,
+  actionSpacing: Dp = OtcHeaderActionSpacing,
+  containerHeight: Dp = OtcHeaderFrameHeight,
+  logoWidth: Dp = OtcHeaderLogoWidth,
+  logoHeight: Dp = OtcHeaderLogoHeight,
+  logoTextSize: androidx.compose.ui.unit.TextUnit = 30.sp,
+  logoMarkSize: Dp = 60.dp,
+  actionTopPadding: Dp = 0.dp,
 ) {
   OtcActionOnlyHeader(
     modifier = modifier,
     onBack = onBack,
+    actionButtonSize = actionButtonSize,
+    actionIconSize = actionIconSize,
+    actionSpacing = actionSpacing,
+    containerHeight = containerHeight,
+    logoWidth = logoWidth,
+    logoHeight = logoHeight,
+    logoTextSize = logoTextSize,
+    logoMarkSize = logoMarkSize,
+    actionTopPadding = actionTopPadding,
   )
 }
 
@@ -3436,16 +7792,20 @@ private fun CompactDetailCard(
   fontFamily: FontFamily,
   content: @Composable () -> Unit,
 ) {
-  Surface(
-    shape = CardShape,
-    color = Color.White,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
-  ) {
-    Column(
-      modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) { content() }
+  BoxWithConstraints {
+    val compactCard = maxWidth < 360.dp
+    Surface(
+      shape = CardShape,
+      color = Panel,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 4.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = if (compactCard) 12.dp else 16.dp, vertical = if (compactCard) 8.dp else 10.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compactCard) 6.dp else 8.dp),
+      ) { content() }
+    }
   }
 }
 
@@ -3518,7 +7878,14 @@ private fun ActionButtonCard(
   modifier: Modifier = Modifier,
 ) {
   Surface(
-    modifier = modifier.clickable(onClick = onClick),
+    modifier = modifier
+      .shadow(
+        elevation = 10.dp,
+        shape = CardShape,
+        ambientColor = SoftGreyShadow,
+        spotColor = SoftGreyShadow,
+      )
+      .clickable(onClick = onClick),
     shape = CardShape,
     color = color,
     tonalElevation = 0.dp,
@@ -3535,7 +7902,7 @@ private fun ActionButtonCard(
         color = Color.White,
         style = TextStyle(
           fontFamily = fontFamily,
-          fontWeight = FontWeight.Normal,
+          fontWeight = FontWeight.SemiBold,
           fontSize = 18.sp,
         ),
       )
@@ -3553,91 +7920,138 @@ private fun PaymentGatewayDialog(
   fontFamily: FontFamily,
   onDismiss: () -> Unit,
   onOpenCart: () -> Unit,
+  onOpenSavedDeals: () -> Unit,
   onCloseDealAndClearCart: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss) {
-    Surface(
-      modifier = Modifier.fillMaxWidth(0.94f),
-      shape = CardShape,
-      color = Color(0xFFFDF1E4),
-      tonalElevation = 0.dp,
-      shadowElevation = 0.dp,
-    ) {
-      Column(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+    BoxWithConstraints {
+      val compactDialog = maxHeight < 860.dp
+      val qrSize = if (compactDialog) 180.dp else 220.dp
+      val dialogVerticalPadding = if (compactDialog) 14.dp else 18.dp
+      val dialogSpacing = if (compactDialog) 10.dp else 14.dp
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth(0.94f)
+          .heightIn(max = maxHeight * 0.9f),
+        shape = CardShape,
+        color = Color(0xFFFDF1E4),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
       ) {
-        AshokvatikaLogo(
-          modifier = Modifier.widthIn(max = 260.dp),
-          textSize = 28.sp,
-          markSize = 58.dp,
-        )
-
-        LabeledReadOnlyCard(
-          label = "",
-          value = "\u20B9 ${formatAmount(totalAmount)}",
-          fontFamily = fontFamily,
-          valueFontSize = 28.sp,
-        )
-
-        CompactDetailCard(fontFamily = fontFamily) {
-          PaymentInfoLine("Client", clientName, fontFamily, labelImageRes = R.drawable.payment_client)
-          PaymentInfoLine("Phone", clientPhone, fontFamily, labelImageRes = R.drawable.payment_phone)
-          PaymentInfoLine("Client ID", clientId, fontFamily, labelImageRes = R.drawable.payment_client_id)
-          PaymentInfoLine("Transaction code", transactionCode, fontFamily, labelImageRes = R.drawable.payment_transaction_id)
-        }
-
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          shape = CardShape,
-          color = Color.White,
-          tonalElevation = 0.dp,
-          shadowElevation = 0.dp,
+        Column(
+          modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = dialogVerticalPadding),
+          verticalArrangement = Arrangement.spacedBy(dialogSpacing),
         ) {
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(20.dp),
-            contentAlignment = Alignment.Center,
-          ) {
-            Image(
-              painter = painterResource(R.drawable.dummy_qr),
-              contentDescription = "Payment QR code",
-              modifier = Modifier.size(220.dp),
-            )
-          }
-        }
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          ActionButtonCard(
-            title = "Close deal and clear cart",
-            color = AccentGreen,
-            fontFamily = fontFamily,
-            onClick = onCloseDealAndClearCart,
-            modifier = Modifier.weight(1f),
+          AshokvatikaLogo(
+            modifier = Modifier.widthIn(max = 260.dp),
+            textSize = 28.sp,
+            markSize = 58.dp,
           )
+
+          Text(
+            text = "Collect payment and confirm the final invoice for this deal.",
+            color = Ink.copy(alpha = 0.66f),
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = 14.sp,
+              lineHeight = 20.sp,
+            ),
+          )
+
+          LabeledReadOnlyCard(
+            label = "Amount due",
+            value = "\u20B9 ${formatAmount(totalAmount)}",
+            fontFamily = fontFamily,
+            valueFontSize = 28.sp,
+          )
+
+          CompactDetailCard(fontFamily = fontFamily) {
+            PaymentInfoLine("Client", clientName, fontFamily, labelImageRes = R.drawable.payment_client)
+            PaymentInfoLine("Phone", clientPhone, fontFamily, labelImageRes = R.drawable.payment_phone)
+            PaymentInfoLine("Client ID", clientId, fontFamily, labelImageRes = R.drawable.payment_client_id)
+            PaymentInfoLine("Transaction code", transactionCode, fontFamily, labelImageRes = R.drawable.payment_transaction_id)
+          }
+
           Surface(
-            modifier = Modifier
-              .size(64.dp)
-              .clickable(onClick = onOpenCart),
-            shape = CircleShape,
-            color = Color(0xFFF3BF47),
+            modifier = Modifier.fillMaxWidth(),
+            shape = CardShape,
+            color = Panel,
+            border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
           ) {
             Box(
-              modifier = Modifier.fillMaxSize(),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(if (compactDialog) 14.dp else 20.dp),
               contentAlignment = Alignment.Center,
             ) {
-              Icon(
-                imageVector = Icons.Filled.ShoppingCart,
-                contentDescription = "Open cart",
-                tint = Color.White,
-              )
+              Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(if (compactDialog) 8.dp else 12.dp),
+              ) {
+                Image(
+                  painter = painterResource(R.drawable.dummy_qr),
+                  contentDescription = "Payment QR code",
+                  modifier = Modifier.size(qrSize),
+                )
+                Text(
+                  text = "Scan this code to complete payment before closing the deal.",
+                  color = Ink.copy(alpha = 0.62f),
+                  textAlign = TextAlign.Center,
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                  ),
+                )
+              }
+            }
+          }
+
+          ActionButtonCard(
+            title = "Closed Deals",
+            color = Accent,
+            fontFamily = fontFamily,
+            onClick = onOpenSavedDeals,
+            modifier = Modifier.fillMaxWidth(),
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            ActionButtonCard(
+              title = "Close Deal and Download Invoice",
+              color = AccentGreen,
+              fontFamily = fontFamily,
+              onClick = onCloseDealAndClearCart,
+              modifier = Modifier.weight(1f),
+            )
+            Surface(
+              modifier = Modifier
+                .size(64.dp)
+                .clickable(onClick = onOpenCart),
+              shape = CircleShape,
+              color = Color(0xFFF3BF47),
+              tonalElevation = 0.dp,
+              shadowElevation = 0.dp,
+            ) {
+              Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.ShoppingCart,
+                  contentDescription = "Open cart",
+                  tint = Color.White,
+                )
+              }
             }
           }
         }
@@ -3654,6 +8068,7 @@ private fun PaymentInfoLine(
   labelImageRes: Int? = null,
   labelTint: Color? = null,
 ) {
+  val labelWidth = if (labelImageRes != null) 56.dp else 132.dp
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3662,7 +8077,7 @@ private fun PaymentInfoLine(
     if (labelImageRes != null) {
       Box(
         modifier = Modifier
-          .width(132.dp)
+          .width(labelWidth)
           .height(24.dp),
         contentAlignment = Alignment.CenterStart,
       ) {
@@ -3671,13 +8086,16 @@ private fun PaymentInfoLine(
           contentDescription = label,
           contentScale = ContentScale.Fit,
           colorFilter = labelTint?.let { ColorFilter.tint(it) },
-          modifier = Modifier.fillMaxSize(),
+          modifier = Modifier
+            .align(Alignment.CenterStart)
+            .fillMaxHeight()
+            .widthIn(max = labelWidth),
         )
       }
     } else {
       Text(
         text = "$label :",
-        modifier = Modifier.width(132.dp),
+        modifier = Modifier.width(labelWidth),
         color = Ink.copy(alpha = 0.75f),
         style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp),
       )
@@ -3698,27 +8116,36 @@ private fun LabeledReadOnlyCard(
   modifier: Modifier = Modifier,
   valueFontSize: androidx.compose.ui.unit.TextUnit = 20.sp,
 ) {
-  Surface(
-    modifier = modifier,
-    shape = CardShape,
-    color = Color.White,
-    tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
-  ) {
-    Column(
-      modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-      verticalArrangement = Arrangement.spacedBy(6.dp),
+  BoxWithConstraints(modifier = modifier) {
+    val compactCard = maxWidth < 220.dp
+    Surface(
+      modifier = Modifier.fillMaxWidth(),
+      shape = CardShape,
+      color = PanelTint,
+      border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
+      tonalElevation = 0.dp,
+      shadowElevation = 2.dp,
     ) {
-      Text(
-        text = label,
-        color = Ink.copy(alpha = 0.75f),
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp),
-      )
-      Text(
-        text = value,
-        color = Ink,
-        style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = valueFontSize, lineHeight = valueFontSize * 1.1f),
-      )
+      Column(
+        modifier = Modifier.padding(horizontal = if (compactCard) 14.dp else 18.dp, vertical = if (compactCard) 10.dp else 14.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compactCard) 4.dp else 6.dp),
+      ) {
+        Text(
+          text = label,
+          color = Ink.copy(alpha = 0.6f),
+          style = TextStyle(fontFamily = fontFamily, fontWeight = FontWeight.Normal, fontSize = if (compactCard) 13.sp else 16.sp),
+        )
+        Text(
+          text = value,
+          color = Ink,
+          style = TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = if (compactCard) (valueFontSize.value * 0.72f).sp else valueFontSize,
+            lineHeight = if (compactCard) (valueFontSize.value * 0.8f).sp else valueFontSize * 1.1f,
+          ),
+        )
+      }
     }
   }
 }
@@ -3730,20 +8157,21 @@ private fun EmptyStateCard(
 ) {
   Surface(
     shape = CardShape,
-    color = Color.White,
+    color = Panel,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
     tonalElevation = 0.dp,
-    shadowElevation = 0.dp,
+    shadowElevation = 2.dp,
   ) {
     Text(
       text = text,
       modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp),
-      color = Ink.copy(alpha = 0.58f),
+      color = Ink.copy(alpha = 0.78f),
       textAlign = TextAlign.Center,
       style = TextStyle(
         fontFamily = fontFamily,
-        fontWeight = FontWeight.Thin,
-        fontSize = 20.sp,
-        lineHeight = 24.sp,
+        fontWeight = FontWeight.Normal,
+        fontSize = 18.sp,
+        lineHeight = 22.sp,
       ),
     )
   }
@@ -3778,7 +8206,8 @@ private fun OpenCartDealRow(
         spotColor = SoftGreyShadow,
       ),
     shape = CardShape,
-    color = Color.White,
+    color = Panel,
+    border = androidx.compose.foundation.BorderStroke(1.dp, PanelBorder),
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
@@ -4510,8 +8939,41 @@ private fun SavedDealCard(
   onClearCart: () -> Unit,
   onDealInfoChange: (String, String, String, String, String) -> Unit,
 ) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
   val displayTitle = deal.rows.firstOrNull()?.title?.takeIf { it.isNotBlank() } ?: deal.title
   var showDealCart by remember(deal.id) { mutableStateOf(false) }
+  var pendingInvoiceExport by remember(deal.id) { mutableStateOf<PendingInvoiceExport?>(null) }
+  val invoiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+    val export = pendingInvoiceExport
+    pendingInvoiceExport = null
+    if (export == null) {
+      return@rememberLauncherForActivityResult
+    }
+    scope.launch {
+      val saved = if (uri == null) {
+        false
+      } else {
+        withContext(Dispatchers.IO) {
+          runCatching {
+            context.contentResolver.openOutputStream(uri, "rwt")?.use { stream ->
+              stream.write(export.pdfBytes)
+              stream.flush()
+            } != null
+          }.getOrDefault(false)
+        }
+      }
+      Toast.makeText(
+        context,
+        when {
+          uri == null -> "Invoice download was skipped."
+          saved -> "Invoice downloaded successfully."
+          else -> "Invoice download failed."
+        },
+        Toast.LENGTH_SHORT,
+      ).show()
+    }
+  }
   Surface(
     modifier = Modifier.fillMaxWidth(),
     shape = CardShape,
@@ -4602,6 +9064,19 @@ private fun SavedDealCard(
       deal = deal,
       fontFamily = fontFamily,
       onDismiss = { showDealCart = false },
+      onDownloadInvoice = {
+        runCatching {
+          PendingInvoiceExport(
+            fileName = buildInvoiceFileName(deal),
+            pdfBytes = buildInvoicePdf(context, deal),
+          )
+        }.onSuccess { export ->
+          pendingInvoiceExport = export
+          invoiceLauncher.launch(export.fileName)
+        }.onFailure {
+          Toast.makeText(context, "Invoice generation failed.", Toast.LENGTH_SHORT).show()
+        }
+      },
       onClearCart = {
         onClearCart()
         showDealCart = false
@@ -4615,6 +9090,7 @@ private fun ClosedDealCartDialog(
   deal: SavedDeal,
   fontFamily: FontFamily,
   onDismiss: () -> Unit,
+  onDownloadInvoice: () -> Unit,
   onClearCart: () -> Unit,
 ) {
   val scrollState = rememberScrollState()
@@ -4690,13 +9166,25 @@ private fun ClosedDealCartDialog(
           }
         }
 
-        ActionButtonCard(
-          title = "Close deals",
-          color = AccentGreen,
-          fontFamily = fontFamily,
-          onClick = onClearCart,
+        Row(
           modifier = Modifier.fillMaxWidth(),
-        )
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          ActionButtonCard(
+            title = "Download invoice",
+            color = Accent,
+            fontFamily = fontFamily,
+            onClick = onDownloadInvoice,
+            modifier = Modifier.weight(1f),
+          )
+          ActionButtonCard(
+            title = "Close deals",
+            color = AccentGreen,
+            fontFamily = fontFamily,
+            onClick = onClearCart,
+            modifier = Modifier.weight(1f),
+          )
+        }
       }
     }
   }
@@ -5182,11 +9670,15 @@ private fun MediaGalleryPopup(
   onContactTextChange: (String) -> Unit,
   fontFamily: FontFamily,
   onAddFromDrive: () -> Unit,
+  onAddBrochureImage: (Int) -> Unit,
   onClose: () -> Unit,
 ) {
+  var activeTab by rememberSaveable { mutableStateOf(MediaPopupTab.GALLERY) }
+  val configuration = LocalConfiguration.current
+  val tabletLayout = configuration.smallestScreenWidthDp >= 600
   Dialog(onDismissRequest = onClose) {
     Surface(
-      modifier = Modifier.fillMaxWidth(0.96f),
+      modifier = Modifier.fillMaxWidth(if (tabletLayout) 0.82f else 0.96f),
       shape = CardShape,
       color = Bg,
       tonalElevation = 0.dp,
@@ -5194,9 +9686,12 @@ private fun MediaGalleryPopup(
     ) {
       Column(
         modifier = Modifier
-          .padding(horizontal = 18.dp, vertical = 18.dp)
+          .padding(
+            horizontal = if (tabletLayout) 24.dp else 18.dp,
+            vertical = if (tabletLayout) 22.dp else 18.dp,
+          )
           .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 20.dp else 16.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -5209,11 +9704,11 @@ private fun MediaGalleryPopup(
             style = TextStyle(
               fontFamily = fontFamily,
               fontWeight = FontWeight.Normal,
-              fontSize = 24.sp,
+              fontSize = if (tabletLayout) 28.sp else 24.sp,
             ),
           )
           CircleIconAction(
-            size = 38.dp,
+            size = if (tabletLayout) 42.dp else 38.dp,
             icon = {
               Icon(
                 imageVector = Icons.Filled.Close,
@@ -5225,11 +9720,62 @@ private fun MediaGalleryPopup(
           )
         }
 
-        GalleryScreen(
-          mediaUris = mediaUris,
-          onClose = onClose,
-          onAddFromDrive = onAddFromDrive,
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 12.dp else 10.dp),
+        ) {
+          MediaPopupTabButton(
+            title = "Gallery",
+            selected = activeTab == MediaPopupTab.GALLERY,
+            onClick = { activeTab = MediaPopupTab.GALLERY },
+            modifier = Modifier.weight(1f),
+          )
+          MediaPopupTabButton(
+            title = "Broucher",
+            selected = activeTab == MediaPopupTab.BROUCHER,
+            onClick = { activeTab = MediaPopupTab.BROUCHER },
+            modifier = Modifier.weight(1f),
+          )
+          MediaPopupTabButton(
+            title = "Broucher2",
+            selected = activeTab == MediaPopupTab.BROUCHER2,
+            onClick = { activeTab = MediaPopupTab.BROUCHER2 },
+            modifier = Modifier.weight(1f),
+          )
+        }
+
+        if (activeTab == MediaPopupTab.GALLERY) {
+          GalleryScreen(
+            mediaUris = mediaUris,
+            onClose = onClose,
+            onAddFromDrive = onAddFromDrive,
+            tabletLayout = tabletLayout,
+          )
+        } else if (activeTab == MediaPopupTab.BROUCHER) {
+          BrochureScreen(
+            mediaUris = mediaUris,
+            productName = productName,
+            onProductNameChange = {},
+            description = primaryDescription,
+            onDescriptionChange = onPrimaryDescriptionChange,
+            contactText = contactText,
+            onAddImageFromDrive = { onAddBrochureImage(0) },
+            onAddImageFromCamera = null,
+            fontFamily = fontFamily,
+          )
+        } else {
+          BrochureTwoScreen(
+            mediaUris = mediaUris,
+            productName = productName,
+            onProductNameChange = {},
+            description = primaryDescription,
+            onDescriptionChange = {},
+            contactText = contactText,
+            onAddImage = onAddBrochureImage,
+            fontFamily = fontFamily,
+            showBottomGrid = true,
+          )
+        }
       }
     }
   }
@@ -5240,6 +9786,7 @@ private fun GalleryScreen(
   mediaUris: List<String>,
   onClose: () -> Unit,
   onAddFromDrive: () -> Unit,
+  tabletLayout: Boolean = false,
 ) {
   val context = LocalContext.current
   val galleryImages = remember(mediaUris) {
@@ -5306,19 +9853,22 @@ private fun GalleryScreen(
   Box(
     modifier = Modifier
       .fillMaxWidth()
-      .height(560.dp)
+      .height(if (tabletLayout) 680.dp else 560.dp)
       .background(Color.White),
   ) {
     Column(modifier = Modifier.fillMaxSize()) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 12.dp, vertical = 6.dp),
+          .padding(
+            horizontal = if (tabletLayout) 18.dp else 12.dp,
+            vertical = if (tabletLayout) 10.dp else 6.dp,
+          ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         CircleIconAction(
-          size = 38.dp,
+          size = if (tabletLayout) 42.dp else 38.dp,
           icon = {
             Icon(
               imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -5333,11 +9883,11 @@ private fun GalleryScreen(
           color = Ink,
           style = TextStyle(
             fontWeight = FontWeight.SemiBold,
-            fontSize = 20.sp,
+            fontSize = if (tabletLayout) 24.sp else 20.sp,
           ),
         )
         CircleIconAction(
-          size = 38.dp,
+          size = if (tabletLayout) 42.dp else 38.dp,
           icon = {
             Icon(
               imageVector = if (isSheetOpen) Icons.Filled.Close else Icons.Filled.AddToDrive,
@@ -5527,7 +10077,7 @@ private fun BottomShareSheet(
   Surface(
     modifier = modifier
       .fillMaxWidth()
-      .offset(y = offsetY),
+      .offset { IntOffset(x = 0, y = offsetY.roundToPx()) },
     shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     color = Color.White,
     tonalElevation = 0.dp,
@@ -5649,6 +10199,755 @@ private fun SelectedImagePreview(
       )
     }
   }
+}
+
+@Composable
+private fun MediaPopupTabButton(
+  title: String,
+  selected: Boolean,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Surface(
+    modifier = modifier.clickable(onClick = onClick),
+    shape = CardShape,
+    color = if (selected) Accent else Color.White,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Box(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Text(
+        text = title,
+        color = if (selected) Color.White else Ink.copy(alpha = 0.78f),
+        style = TextStyle(
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 14.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun BrochureScreen(
+  mediaUris: List<String>,
+  productName: String,
+  onProductNameChange: (String) -> Unit,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onAddImageFromDrive: () -> Unit,
+  onAddImageFromCamera: (() -> Unit)?,
+  fontFamily: FontFamily,
+  compactScreen: Boolean = false,
+  standalonePage: Boolean = false,
+) {
+  val context = LocalContext.current
+  val brochureImageUri = remember(mediaUris) { mediaUris.firstOrNull { !isVideoUri(context, it) } }
+  var darkMode by rememberSaveable { mutableStateOf(false) }
+  val brochureBackground = if (darkMode) Color(0xFF7B7B7B) else Color.White
+  val titleColor = if (darkMode) Color.White.copy(alpha = 0.92f) else Color(0xFF6E6A64)
+  val bodyColor = if (darkMode) Color.White.copy(alpha = 0.82f) else Color(0xFF5F5952)
+  val contactValue = contactText
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = if (standalonePage) androidx.compose.foundation.shape.RoundedCornerShape(0.dp) else CardShape,
+    color = brochureBackground,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 14.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val tabletLayout = maxWidth >= 700.dp
+        val contentWidth = if (tabletLayout) minOf(maxWidth * 0.82f, 560.dp) else maxWidth
+        val logoWidth = if (tabletLayout) 152.dp else 124.dp
+        val logoHeight = if (tabletLayout) 36.dp else 30.dp
+        val imageHeight = if (tabletLayout) 380.dp else 320.dp
+        val titleSize = if (tabletLayout) 28.sp else 22.sp
+        val titleLineHeight = if (tabletLayout) 32.sp else 26.sp
+        val bodySize = if (tabletLayout) 14.sp else 12.sp
+        val bodyLineHeight = if (tabletLayout) 20.sp else 16.sp
+        val contactSize = if (tabletLayout) 13.sp else 11.sp
+
+        Column(
+          modifier = Modifier.width(contentWidth).align(Alignment.TopCenter),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          AshokvatikaLogo(
+            modifier = Modifier
+              .align(Alignment.Start)
+              .padding(start = 2.dp, top = 2.dp)
+              .width(logoWidth),
+            textSize = if (tabletLayout) 22.sp else 18.sp,
+            markSize = if (tabletLayout) 28.dp else 22.dp,
+            fixedHeight = logoHeight,
+          )
+
+          Spacer(modifier = Modifier.height(if (tabletLayout) 14.dp else 10.dp))
+
+          BrochureImageContainer(
+            uriString = brochureImageUri,
+            onAddImageFromDrive = onAddImageFromDrive,
+            onAddImageFromCamera = onAddImageFromCamera,
+            height = imageHeight,
+            compactScreen = compactScreen,
+          )
+
+          Spacer(modifier = Modifier.height(if (tabletLayout) 16.dp else 12.dp))
+
+          Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+          ) {
+            TemplateEditableText(
+              value = productName,
+              onValueChange = onProductNameChange,
+              placeholder = "Product Title",
+              fontFamily = fontFamily,
+              textAlign = TextAlign.Center,
+              fontSize = titleSize,
+              color = titleColor,
+              lineHeight = titleLineHeight,
+              fontWeight = FontWeight.SemiBold,
+              clearOnFirstFocusValue = "Product Title",
+              widthFraction = if (tabletLayout) 0.68f else 0.76f,
+            )
+          }
+
+          Spacer(modifier = Modifier.height(if (tabletLayout) 14.dp else 10.dp))
+
+          TemplateEditableText(
+            value = description,
+            onValueChange = onDescriptionChange,
+            placeholder = "Product Description, Product Description, Product Description,\nProduct Description, Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+            fontFamily = fontFamily,
+            textAlign = TextAlign.Center,
+            fontSize = bodySize,
+            color = bodyColor,
+            lineHeight = bodyLineHeight,
+            minLines = 4,
+            clearPlaceholderOnFocus = true,
+            clearOnFirstFocusValue = "Product Description, Product Description, Product Description,\nProduct Description, Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+            widthFraction = if (tabletLayout) 0.9f else 0.94f,
+          )
+
+          Spacer(modifier = Modifier.height(if (tabletLayout) 18.dp else 14.dp))
+
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 18.dp else 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            BrochureCircleAction(
+              onClick = { darkMode = !darkMode },
+              icon = if (darkMode) Icons.Filled.DarkMode else Icons.Filled.WbSunny,
+              tint = if (darkMode) Color.White else Ink.copy(alpha = 0.55f),
+            )
+            BrochureCircleAction(
+              onClick = {},
+              icon = Icons.Filled.WaterDrop,
+              tint = if (darkMode) Color.White.copy(alpha = 0.9f) else Ink.copy(alpha = 0.55f),
+            )
+          }
+
+          Spacer(modifier = Modifier.height(if (tabletLayout) 18.dp else 14.dp))
+
+          Text(
+            text = contactValue,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (darkMode) Color.White.copy(alpha = 0.78f) else Ink.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+              fontFamily = fontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = contactSize,
+              lineHeight = if (tabletLayout) 17.sp else 14.sp,
+            ),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BrochureTwoScreen(
+  mediaUris: List<String>,
+  productName: String,
+  onProductNameChange: (String) -> Unit,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onAddImage: (Int) -> Unit,
+  onAddImageFromCamera: ((Int) -> Unit)? = null,
+  fontFamily: FontFamily,
+  standalonePage: Boolean = false,
+  showBottomGrid: Boolean = true,
+  showLogo: Boolean = true,
+  useContainerBackground: Boolean = true,
+  useUniformImageSizes: Boolean = false,
+) {
+  val context = LocalContext.current
+  val brochureImages = remember(mediaUris) { mediaUris.filterNot { isVideoUri(context, it) } }
+  var darkMode by rememberSaveable { mutableStateOf(false) }
+  val background = when {
+    !useContainerBackground -> Color.Transparent
+    darkMode -> Color(0xFF7B7B7B)
+    else -> Color.White
+  }
+  val titleColor = if (darkMode) Color.White.copy(alpha = 0.92f) else Color(0xFF6E6A64)
+  val bodyColor = if (darkMode) Color.White.copy(alpha = 0.82f) else Color(0xFF5F5952)
+  val contactValue = contactText
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = if (standalonePage) androidx.compose.foundation.shape.RoundedCornerShape(0.dp) else CardShape,
+    color = background,
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 14.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val tabletLayout = maxWidth >= 760.dp
+        val layoutWidth = if (tabletLayout) minOf(maxWidth * 0.92f, 860.dp) else maxWidth
+        val topImageHeight = if (tabletLayout) 332.dp else 248.dp
+        val bottomImageHeight = if (useUniformImageSizes) topImageHeight else if (tabletLayout) 238.dp else 208.dp
+        val titleSize = if (tabletLayout) 25.sp else 20.sp
+        val titleLineHeight = if (tabletLayout) 30.sp else 24.sp
+        val descriptionSize = if (tabletLayout) 13.sp else 11.sp
+        val descriptionLineHeight = if (tabletLayout) 19.sp else 16.sp
+        val contactSize = if (tabletLayout) 12.sp else 9.sp
+        val logoWidth = if (tabletLayout) 154.dp else 126.dp
+        val logoHeight = if (tabletLayout) 36.dp else 30.dp
+
+        Column(
+          modifier = Modifier.width(layoutWidth).align(Alignment.TopCenter),
+          verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 16.dp else 12.dp),
+        ) {
+          if (showLogo || contactValue.isNotBlank()) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = if (showLogo) Arrangement.SpaceBetween else Arrangement.End,
+              verticalAlignment = Alignment.Top,
+            ) {
+              if (showLogo) {
+                AshokvatikaLogo(
+                  modifier = Modifier
+                    .padding(top = 2.dp)
+                    .width(logoWidth),
+                  textSize = if (tabletLayout) 22.sp else 18.sp,
+                  markSize = if (tabletLayout) 28.dp else 22.dp,
+                  fixedHeight = logoHeight,
+                )
+              }
+              if (contactValue.isNotBlank()) {
+                Text(
+                  text = contactValue,
+                  modifier = Modifier.padding(top = if (tabletLayout) 8.dp else 6.dp),
+                  color = if (darkMode) Color.White.copy(alpha = 0.8f) else Ink.copy(alpha = 0.7f),
+                  textAlign = TextAlign.End,
+                  style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = contactSize,
+                    lineHeight = if (tabletLayout) 15.sp else 13.sp,
+                  ),
+                )
+              }
+            }
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 14.dp else 10.dp),
+            verticalAlignment = Alignment.Top,
+          ) {
+            BrochureImageContainer(
+              uriString = brochureImages.getOrNull(0),
+              onAddImageFromDrive = { onAddImage(0) },
+              onAddImageFromCamera = onAddImageFromCamera?.let { cameraHandler -> { cameraHandler(0) } },
+              modifier = Modifier.weight(0.92f),
+              height = topImageHeight,
+            )
+            Column(
+              modifier = Modifier.weight(1f),
+              verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 12.dp else 8.dp),
+            ) {
+              TemplateEditableText(
+                value = productName,
+                onValueChange = onProductNameChange,
+                placeholder = "Product Title",
+                fontFamily = fontFamily,
+                textAlign = TextAlign.Start,
+                fontSize = titleSize,
+                color = titleColor,
+                lineHeight = titleLineHeight,
+                fontWeight = FontWeight.SemiBold,
+                clearOnFirstFocusValue = "Product Title",
+              )
+              TemplateEditableText(
+                value = description,
+                onValueChange = onDescriptionChange,
+                placeholder = "Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+                fontFamily = fontFamily,
+                textAlign = TextAlign.Start,
+                fontSize = descriptionSize,
+                color = bodyColor,
+                lineHeight = descriptionLineHeight,
+                minLines = 4,
+                fontWeight = FontWeight.Medium,
+                clearPlaceholderOnFocus = true,
+                clearOnFirstFocusValue = "Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+              )
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 16.dp else 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                BrochureCircleAction(
+                  onClick = { darkMode = !darkMode },
+                  icon = if (darkMode) Icons.Filled.DarkMode else Icons.Filled.WbSunny,
+                  tint = if (darkMode) Color.White else Ink.copy(alpha = 0.55f),
+                )
+                BrochureCircleAction(
+                  onClick = {},
+                  icon = Icons.Filled.WaterDrop,
+                  tint = if (darkMode) Color.White.copy(alpha = 0.9f) else Ink.copy(alpha = 0.55f),
+                )
+              }
+            }
+          }
+
+          if (showBottomGrid) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 14.dp else 12.dp),
+            ) {
+              BrochureImageContainer(
+                uriString = brochureImages.getOrNull(1),
+                onAddImageFromDrive = { onAddImage(1) },
+                onAddImageFromCamera = onAddImageFromCamera?.let { cameraHandler -> { cameraHandler(1) } },
+                modifier = Modifier.weight(1f),
+                height = bottomImageHeight,
+              )
+              BrochureImageContainer(
+                uriString = brochureImages.getOrNull(2),
+                onAddImageFromDrive = { onAddImage(2) },
+                onAddImageFromCamera = onAddImageFromCamera?.let { cameraHandler -> { cameraHandler(2) } },
+                modifier = Modifier.weight(1f),
+                height = bottomImageHeight,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private data class CatCatalogItemState(
+  val sku: String,
+  val onSkuChange: (String) -> Unit,
+  val title: String,
+  val onTitleChange: (String) -> Unit,
+  val description: String,
+  val onDescriptionChange: (String) -> Unit,
+  val useCameraPlaceholder: Boolean = false,
+)
+
+private fun defaultCatalogDescription(): String =
+  "Product Description, Product Description,\n" +
+    "Product Description, Product Description,\n" +
+    "Product Description, Product Description,\n" +
+    "Product Description, Product Description,"
+
+@Composable
+private fun CatTwoScreen(
+  mediaUris: List<String>,
+  firstSku: String,
+  onFirstSkuChange: (String) -> Unit,
+  firstTitle: String,
+  onFirstTitleChange: (String) -> Unit,
+  firstDescription: String,
+  onFirstDescriptionChange: (String) -> Unit,
+  secondSku: String,
+  onSecondSkuChange: (String) -> Unit,
+  secondTitle: String,
+  onSecondTitleChange: (String) -> Unit,
+  secondDescription: String,
+  onSecondDescriptionChange: (String) -> Unit,
+  contactText: String,
+  onAddImage: (Int) -> Unit,
+  onAddImageFromCamera: ((Int) -> Unit)? = null,
+  fontFamily: FontFamily,
+  showLogo: Boolean = true,
+) {
+  CatCatalogScreen(
+    mediaUris = mediaUris,
+    items = listOf(
+      CatCatalogItemState(firstSku, onFirstSkuChange, firstTitle, onFirstTitleChange, firstDescription, onFirstDescriptionChange),
+      CatCatalogItemState(secondSku, onSecondSkuChange, secondTitle, onSecondTitleChange, secondDescription, onSecondDescriptionChange),
+    ),
+    contactText = contactText,
+    onAddImage = onAddImage,
+    onAddImageFromCamera = onAddImageFromCamera,
+    fontFamily = fontFamily,
+    showLogo = showLogo,
+  )
+}
+
+@Composable
+private fun CatCatalogScreen(
+  mediaUris: List<String>,
+  items: List<CatCatalogItemState>,
+  contactText: String,
+  onAddImage: (Int) -> Unit,
+  onAddImageFromCamera: ((Int) -> Unit)? = null,
+  fontFamily: FontFamily,
+  showLogo: Boolean = true,
+) {
+  val context = LocalContext.current
+  val brochureImages = remember(mediaUris) { mediaUris.filterNot { isVideoUri(context, it) } }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 14.dp, vertical = 14.dp),
+    verticalArrangement = Arrangement.spacedBy(18.dp),
+  ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+      val tabletLayout = maxWidth >= 760.dp
+      val layoutWidth = if (tabletLayout) minOf(maxWidth * 0.94f, 860.dp) else maxWidth
+
+      Column(
+        modifier = Modifier
+          .width(layoutWidth)
+          .align(Alignment.TopCenter),
+        verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 18.dp else 16.dp),
+      ) {
+        CatTwoHeader(
+          contactText = contactText,
+          fontFamily = fontFamily,
+          tabletLayout = tabletLayout,
+          showLogo = showLogo,
+        )
+        items.forEachIndexed { index, item ->
+          CatTwoItemRow(
+            sku = item.sku,
+            onSkuChange = item.onSkuChange,
+            title = item.title,
+            onTitleChange = item.onTitleChange,
+            description = item.description,
+            onDescriptionChange = item.onDescriptionChange,
+            uriString = brochureImages.getOrNull(index),
+            onAddImage = { onAddImage(index) },
+            onAddImageFromCamera = onAddImageFromCamera?.let { cameraHandler -> { cameraHandler(index) } },
+            fontFamily = fontFamily,
+            tabletLayout = tabletLayout,
+            useCameraPlaceholder = item.useCameraPlaceholder,
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CatTwoHeader(
+  contactText: String,
+  fontFamily: FontFamily,
+  tabletLayout: Boolean,
+  showLogo: Boolean = true,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = if (showLogo) Arrangement.SpaceBetween else Arrangement.End,
+    verticalAlignment = Alignment.Top,
+  ) {
+    if (showLogo) {
+      AshokvatikaLogo(
+        modifier = Modifier
+          .padding(top = 2.dp)
+          .width(if (tabletLayout) 154.dp else 126.dp),
+        textSize = if (tabletLayout) 22.sp else 18.sp,
+        markSize = if (tabletLayout) 28.dp else 22.dp,
+        fixedHeight = if (tabletLayout) 36.dp else 30.dp,
+      )
+    }
+    if (contactText.isNotBlank()) {
+      Text(
+        text = contactText,
+        modifier = Modifier.padding(top = if (tabletLayout) 8.dp else 6.dp),
+        color = Ink.copy(alpha = 0.7f),
+        textAlign = TextAlign.End,
+        style = TextStyle(
+          fontFamily = fontFamily,
+          fontWeight = FontWeight.Medium,
+          fontSize = if (tabletLayout) 12.sp else 9.sp,
+          lineHeight = if (tabletLayout) 15.sp else 13.sp,
+        ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun CatTwoItemRow(
+  sku: String,
+  onSkuChange: (String) -> Unit,
+  title: String,
+  onTitleChange: (String) -> Unit,
+  description: String,
+  onDescriptionChange: (String) -> Unit,
+  uriString: String?,
+  onAddImage: () -> Unit,
+  onAddImageFromCamera: (() -> Unit)? = null,
+  fontFamily: FontFamily,
+  tabletLayout: Boolean,
+  useCameraPlaceholder: Boolean = false,
+) {
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 10.dp else 8.dp),
+  ) {
+    TemplateEditableText(
+      value = sku,
+      onValueChange = onSkuChange,
+      placeholder = "SKU#",
+      fontFamily = fontFamily,
+      textAlign = TextAlign.Start,
+      fontSize = if (tabletLayout) 20.sp else 16.sp,
+      color = Color(0xFF6E6A64),
+      lineHeight = if (tabletLayout) 24.sp else 20.sp,
+      fontWeight = FontWeight.SemiBold,
+      clearOnFirstFocusValue = "SKU#",
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 14.dp else 10.dp),
+      verticalAlignment = Alignment.Top,
+    ) {
+      BrochureImageContainer(
+        uriString = uriString,
+        onAddImageFromDrive = onAddImage,
+        onAddImageFromCamera = onAddImageFromCamera,
+        modifier = Modifier.weight(0.92f),
+        height = if (tabletLayout) 332.dp else 248.dp,
+        placeholderIcon = if (useCameraPlaceholder) Icons.Filled.PhotoCamera else Icons.Filled.AddToDrive,
+        placeholderIconDescription = if (useCameraPlaceholder) "Camera" else "Google Drive",
+        showActionButtons = !useCameraPlaceholder || onAddImageFromCamera != null,
+        openPickerOnContainerTap = useCameraPlaceholder,
+      )
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(if (tabletLayout) 12.dp else 8.dp),
+      ) {
+        TemplateEditableText(
+          value = title,
+          onValueChange = onTitleChange,
+          placeholder = "Product Title",
+          fontFamily = fontFamily,
+          textAlign = TextAlign.Start,
+          fontSize = if (tabletLayout) 25.sp else 20.sp,
+          color = Color(0xFF6E6A64),
+          lineHeight = if (tabletLayout) 30.sp else 24.sp,
+          fontWeight = FontWeight.SemiBold,
+          clearOnFirstFocusValue = "Product Title",
+        )
+        TemplateEditableText(
+          value = description,
+          onValueChange = onDescriptionChange,
+          placeholder = "Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+          fontFamily = fontFamily,
+          textAlign = TextAlign.Start,
+          fontSize = if (tabletLayout) 13.sp else 11.sp,
+          color = Color(0xFF5F5952),
+          lineHeight = if (tabletLayout) 19.sp else 16.sp,
+          minLines = 4,
+          fontWeight = FontWeight.Medium,
+          clearPlaceholderOnFocus = true,
+          clearOnFirstFocusValue = "Product Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,\nProduct Description, Product Description,",
+        )
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(if (tabletLayout) 16.dp else 12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          BrochureCircleAction(
+            onClick = {},
+            icon = Icons.Filled.WbSunny,
+            tint = Ink.copy(alpha = 0.55f),
+          )
+          BrochureCircleAction(
+            onClick = {},
+            icon = Icons.Filled.WaterDrop,
+            tint = Ink.copy(alpha = 0.55f),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BrochureImageContainer(
+  uriString: String?,
+  onAddImageFromDrive: () -> Unit,
+  onAddImageFromCamera: (() -> Unit)?,
+  modifier: Modifier = Modifier,
+  height: Dp = 320.dp,
+  compactScreen: Boolean = false,
+  placeholderIcon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Filled.AddToDrive,
+  placeholderIconDescription: String = "Google Drive",
+  showActionButtons: Boolean = true,
+  openPickerOnContainerTap: Boolean = false,
+) {
+  val imageBitmap by rememberDecodedImage(uriString, maxDimensionPx = 1600)
+  val hasImage = imageBitmap != null
+  var actionButtonsVisible by remember(uriString) { mutableStateOf(uriString.isNullOrBlank()) }
+
+  Surface(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(height)
+      .clickable(
+        enabled = openPickerOnContainerTap || hasImage,
+      ) {
+        when {
+          openPickerOnContainerTap && !hasImage -> onAddImageFromDrive()
+          hasImage -> actionButtonsVisible = !actionButtonsVisible
+        }
+      },
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    color = Color(0xFFF9E5D9),
+    tonalElevation = 0.dp,
+    shadowElevation = 0.dp,
+  ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+      val largeContainer = maxWidth >= 280.dp || maxHeight >= 280.dp
+      val placeholderIconSize = if (largeContainer) 46.dp else 34.dp
+      val placeholderTextSize = if (largeContainer) 18.sp else 14.sp
+      val overlayPadding = if (largeContainer) 16.dp else 10.dp
+      val overlayIconSize = if (largeContainer) 18.dp else 16.dp
+      val overlayTextSize = if (largeContainer) 14.sp else 12.sp
+      val actionSize = if (compactScreen) 50.dp else 56.dp
+      val actionIconSize = if (compactScreen) 22.dp else 26.dp
+
+      Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (imageBitmap != null) {
+          Image(
+            bitmap = imageBitmap!!,
+            contentDescription = "Brochure image",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+          )
+        } else {
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(if (largeContainer) 12.dp else 8.dp),
+          ) {
+            Icon(
+              imageVector = placeholderIcon,
+              contentDescription = placeholderIconDescription,
+              tint = Ink.copy(alpha = 0.42f),
+              modifier = Modifier.size(placeholderIconSize),
+            )
+            Text(
+              text = "image container",
+              color = Ink.copy(alpha = 0.4f),
+              textAlign = TextAlign.Center,
+              style = TextStyle(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = placeholderTextSize,
+              ),
+            )
+          }
+        }
+
+        if (showActionButtons && (!hasImage || actionButtonsVisible)) {
+          Surface(
+            modifier = Modifier
+              .align(Alignment.BottomCenter)
+              .padding(bottom = overlayPadding),
+            color = Color.Transparent,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              if (onAddImageFromCamera != null) {
+                CircleIconAction(
+                  size = actionSize,
+                  icon = {
+                    Icon(
+                      imageVector = Icons.Filled.PhotoCamera,
+                      contentDescription = "Camera",
+                      tint = Accent,
+                      modifier = Modifier.size(actionIconSize),
+                    )
+                  },
+                  onClick = onAddImageFromCamera,
+                )
+              }
+              CircleIconAction(
+                size = actionSize,
+                icon = {
+                  Icon(
+                    imageVector = Icons.Filled.AddToDrive,
+                    contentDescription = "Google Drive",
+                    tint = Accent,
+                    modifier = Modifier.size(overlayIconSize.coerceAtLeast(18.dp)),
+                  )
+                },
+                onClick = onAddImageFromDrive,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BrochureCircleAction(
+  onClick: () -> Unit,
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  tint: Color,
+) {
+  CircleIconAction(
+    size = 42.dp,
+    borderColor = Ink.copy(alpha = 0.12f),
+    borderWidth = 1.dp,
+    shadowElevation = 0.dp,
+    icon = {
+      Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(20.dp),
+      )
+    },
+    onClick = onClick,
+  )
 }
 
 @Composable
@@ -6375,11 +11674,24 @@ private fun TemplateEditableText(
   enabled: Boolean = true,
   letterSpacing: androidx.compose.ui.unit.TextUnit = 0.sp,
   fontWeight: FontWeight = FontWeight.Thin,
+  clearPlaceholderOnFocus: Boolean = false,
+  clearOnFirstFocusValue: String? = null,
+  widthFraction: Float = 1f,
 ) {
+  var isFocused by remember { mutableStateOf(false) }
+  var clearedOnFocus by remember(clearOnFirstFocusValue) { mutableStateOf(false) }
   BasicTextField(
     value = value,
     onValueChange = onValueChange,
-    modifier = Modifier.fillMaxWidth(),
+    modifier = Modifier
+      .fillMaxWidth(widthFraction)
+      .onFocusChanged {
+        isFocused = it.isFocused
+        if (it.isFocused && clearOnFirstFocusValue != null && !clearedOnFocus && value == clearOnFirstFocusValue) {
+          onValueChange("")
+          clearedOnFocus = true
+        }
+      },
     enabled = enabled,
     minLines = minLines,
     textStyle = TextStyle(
@@ -6394,7 +11706,7 @@ private fun TemplateEditableText(
     cursorBrush = SolidColor(Accent),
     decorationBox = { innerTextField ->
       Box(modifier = Modifier.fillMaxWidth()) {
-        if (value.isBlank() && placeholder.isNotBlank()) {
+        if (value.isBlank() && placeholder.isNotBlank() && (!clearPlaceholderOnFocus || !isFocused)) {
           Text(
             text = placeholder,
             modifier = Modifier.fillMaxWidth(),
@@ -7836,11 +13148,14 @@ private fun ContemporaryCalendar(
 @Composable
 private fun UploadIconOption(
   icon: @Composable () -> Unit,
+  size: Dp = 58.dp,
   onClick: () -> Unit,
 ) {
   CircleIconAction(
-    size = 58.dp,
+    size = size,
     icon = icon,
+    backgroundColor = Color.Transparent,
+    shadowElevation = 0.dp,
     onClick = onClick,
   )
 }
@@ -7892,6 +13207,7 @@ private fun ActionStatCard(
   valueFontSize: androidx.compose.ui.unit.TextUnit,
   valueLineHeight: androidx.compose.ui.unit.TextUnit,
 ) {
+  val titleFontSize = 22.75.sp
   Surface(
     modifier = modifier
       .height(cardHeight)
@@ -7910,7 +13226,7 @@ private fun ActionStatCard(
     Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 10.dp, vertical = 6.dp),
+        .padding(horizontal = 12.dp, vertical = 10.dp),
       verticalArrangement = Arrangement.SpaceBetween,
     ) {
       Text(
@@ -7919,7 +13235,7 @@ private fun ActionStatCard(
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Thin,
-          fontSize = 13.sp,
+          fontSize = titleFontSize,
         ),
       )
       Text(
@@ -7950,6 +13266,7 @@ private fun EditableStatCard(
   numeric: Boolean = false,
   prefix: String = "",
 ) {
+  val titleFontSize = 22.75.sp
   Surface(
     modifier = modifier
       .height(cardHeight)
@@ -7975,7 +13292,7 @@ private fun EditableStatCard(
     Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 10.dp, vertical = 6.dp),
+        .padding(horizontal = 12.dp, vertical = 10.dp),
       verticalArrangement = Arrangement.SpaceBetween,
     ) {
       Text(
@@ -7984,7 +13301,7 @@ private fun EditableStatCard(
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Thin,
-          fontSize = 13.sp,
+          fontSize = titleFontSize,
         ),
       )
 
@@ -8079,7 +13396,9 @@ private fun InlineEditor(
   fontSize: androidx.compose.ui.unit.TextUnit,
   textAlign: TextAlign,
   widthFraction: Float,
+  clearOnFirstTap: Boolean = false,
 ) {
+  var clearedOnFocus by remember(clearOnFirstTap) { mutableStateOf(false) }
   Box(
     modifier = Modifier
       .fillMaxWidth(widthFraction)
@@ -8089,7 +13408,14 @@ private fun InlineEditor(
     BasicTextField(
       value = value,
       onValueChange = onValueChange,
-      modifier = Modifier.fillMaxWidth(),
+      modifier = Modifier
+        .fillMaxWidth()
+        .onFocusChanged { focusState ->
+          if (focusState.isFocused && clearOnFirstTap && !clearedOnFocus && value == "Product Name") {
+            onValueChange("")
+            clearedOnFocus = true
+          }
+        },
       singleLine = true,
       textStyle = TextStyle(
         fontFamily = fontFamily,
@@ -8111,21 +13437,27 @@ private fun CircleIconAction(
   icon: @Composable () -> Unit,
   borderColor: Color = Color.Transparent,
   borderWidth: Dp = 0.dp,
+  backgroundColor: Color = Color.White,
+  shadowElevation: Dp = 10.dp,
   onClick: () -> Unit,
 ) {
   Surface(
     modifier = modifier
       .size(size)
       .shadow(
-        elevation = 10.dp,
+        elevation = shadowElevation,
         shape = CircleShape,
         ambientColor = SoftGreyShadow,
         spotColor = SoftGreyShadow,
       )
       .clickable(onClick = onClick),
     shape = CircleShape,
-    color = Color.White,
-    border = if (borderWidth > 0.dp) androidx.compose.foundation.BorderStroke(borderWidth, borderColor) else null,
+    color = backgroundColor,
+    border = if (borderWidth > 0.dp) {
+      androidx.compose.foundation.BorderStroke(borderWidth, borderColor)
+    } else {
+      androidx.compose.foundation.BorderStroke(1.dp, PanelBorder.copy(alpha = 0.9f))
+    },
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
@@ -8145,7 +13477,11 @@ private data class ProductDetail(
   val rent: String,
   val details: String,
   val price: String,
+  val landingPrice: String = "",
   val checkout: String = "",
+  val vendorName: String = "",
+  val vendorPhone: String = "",
+  val vendorEmail: String = "",
   val imageUri: String? = null,
   val mediaUris: List<String> = emptyList(),
   val templatePrimaryTitle: String = "",
@@ -8173,7 +13509,12 @@ private data class OtcCarouselItem(
 
 private fun otcCatalog(): List<OtcCarouselItem> {
   val liveItems = LiveInventoryCatalog.inventoryByDestination
-    .filterKeys { destination -> destination != DashboardDestination.OTC }
+    .filterKeys { destination ->
+      destination == DashboardDestination.OTC ||
+        destination == DashboardDestination.Plants ||
+        destination == DashboardDestination.Pots ||
+        destination == DashboardDestination.Supplies
+    }
     .values
     .flatten()
     .map { item ->
@@ -8184,6 +13525,9 @@ private fun otcCatalog(): List<OtcCarouselItem> {
           DashboardDestination.Pots -> OtcCarouselCategory.Pots
           DashboardDestination.Supplies -> OtcCarouselCategory.Supplies
           DashboardDestination.OTC -> OtcCarouselCategory.Plant
+          DashboardDestination.Docs -> OtcCarouselCategory.Plant
+          DashboardDestination.Live -> OtcCarouselCategory.Plant
+          DashboardDestination.Art -> OtcCarouselCategory.Plant
         },
         name = item.name,
         shortName = item.name
@@ -8193,48 +13537,14 @@ private fun otcCatalog(): List<OtcCarouselItem> {
           .joinToString("") { it.take(1).uppercase(Locale.US) }
           .ifBlank { item.name.take(2).uppercase(Locale.US) },
         price = item.price.orZero(),
-        landingPrice = item.checkout.orZero(),
+        landingPrice = item.landingPrice.orZero(),
         imageUri = item.mediaUris.firstOrNull() ?: item.imageUri,
       )
     }
-
-  if (liveItems.isNotEmpty()) return liveItems
-
-  return listOf(
-    OtcCarouselItem("plant-1", OtcCarouselCategory.Plant, "Bamboo 3 Lucky", "B3", "1200", "820"),
-    OtcCarouselItem("plant-2", OtcCarouselCategory.Plant, "Money Plant", "MP", "650", "430"),
-    OtcCarouselItem("plant-3", OtcCarouselCategory.Plant, "Snake Plant", "SP", "850", "580"),
-    OtcCarouselItem("plant-4", OtcCarouselCategory.Plant, "Areca Palm", "AP", "1400", "960"),
-    OtcCarouselItem("plant-5", OtcCarouselCategory.Plant, "Jade Plant", "JP", "520", "340"),
-    OtcCarouselItem("plant-6", OtcCarouselCategory.Plant, "Peace Lily", "PL", "950", "650"),
-    OtcCarouselItem("pots-1", OtcCarouselCategory.Pots, "Terracotta Pot", "TP", "900", "610"),
-    OtcCarouselItem("pots-2", OtcCarouselCategory.Pots, "Ceramic Pot", "CP", "750", "520"),
-    OtcCarouselItem("pots-3", OtcCarouselCategory.Pots, "Hanging Pot", "HP", "680", "470"),
-    OtcCarouselItem("pots-4", OtcCarouselCategory.Pots, "Table Pot", "TB", "420", "290"),
-    OtcCarouselItem("pots-5", OtcCarouselCategory.Pots, "Round Pot", "RP", "560", "380"),
-    OtcCarouselItem("pots-6", OtcCarouselCategory.Pots, "Tall Planter", "TL", "1100", "760"),
-    OtcCarouselItem("supplies-1", OtcCarouselCategory.Supplies, "Garden Mix", "GM", "640", "440"),
-    OtcCarouselItem("supplies-2", OtcCarouselCategory.Supplies, "Cocopeat", "CP", "320", "210"),
-    OtcCarouselItem("supplies-3", OtcCarouselCategory.Supplies, "Fertilizer", "FT", "450", "310"),
-    OtcCarouselItem("supplies-4", OtcCarouselCategory.Supplies, "Neem Spray", "NS", "360", "250"),
-    OtcCarouselItem("supplies-5", OtcCarouselCategory.Supplies, "Plant Food", "PF", "390", "270"),
-    OtcCarouselItem("supplies-6", OtcCarouselCategory.Supplies, "Pebbles", "PB", "280", "190"),
-  )
+  return liveItems
 }
 
-private fun buildProductCatalog(): List<BuildProductItem> {
-  return listOf(
-    BuildProductItem("pots-ceramic-oak-green", BuildProductCategory.Pots, "Ceramic oak green", 74, 150, "COG"),
-    BuildProductItem("pots-ceramic-sandy-aqua", BuildProductCategory.Pots, "Ceramic sandy aqua", 20, 180, "CSA"),
-    BuildProductItem("pots-ceramic-sandy-brown", BuildProductCategory.Pots, "Ceramic sandy brown", 8, 270, "CSB"),
-    BuildProductItem("pots-clay-oak", BuildProductCategory.Pots, "Clay oak", 59, 125, "CO"),
-    BuildProductItem("pots-plastic-oggy-white", BuildProductCategory.Pots, "Plastic oggy white", 198, 140, "POW"),
-    BuildProductItem("supplies-bridge", BuildProductCategory.Supplies, "Bridge", 17, 380, "BR"),
-    BuildProductItem("supplies-fairy-resting", BuildProductCategory.Supplies, "Fairy resting", 12, 250, "FR"),
-    BuildProductItem("supplies-pebbles-mix", BuildProductCategory.Supplies, "Pebbles mix", 31, 120, "PM"),
-    BuildProductItem("supplies-mini-fence", BuildProductCategory.Supplies, "Mini fence", 22, 90, "MF"),
-  )
-}
+private fun buildProductCatalog(): List<BuildProductItem> = emptyList()
 
 private fun currentDateLabel(): String {
   val today = java.util.Calendar.getInstance()
@@ -8281,6 +13591,30 @@ private fun detailFor(destination: DashboardDestination): ProductDetail {
       price = "",
     )
     DashboardDestination.OTC -> ProductDetail(
+      name = "Product Name",
+      batch = "",
+      sale = "",
+      rent = "",
+      details = "",
+      price = "",
+    )
+    DashboardDestination.Docs -> ProductDetail(
+      name = "Product Name",
+      batch = "",
+      sale = "",
+      rent = "",
+      details = "",
+      price = "",
+    )
+    DashboardDestination.Live -> ProductDetail(
+      name = "Product Name",
+      batch = "",
+      sale = "",
+      rent = "",
+      details = "",
+      price = "",
+    )
+    DashboardDestination.Art -> ProductDetail(
       name = "Product Name",
       batch = "",
       sale = "",
@@ -8340,19 +13674,39 @@ private fun OpenCartRow.displayAmount(): Int {
   return customAmount ?: baseAmount()
 }
 
+private fun buildInvoiceFileName(deal: SavedDeal): String {
+  val rawLabel = buildString {
+    append("ASHOKVATIKA_invoice_")
+    append(
+      deal.transactionCode
+        .ifBlank { deal.clientName.ifBlank { "deal" } }
+        .trim()
+        .replace(Regex("[^A-Za-z0-9_-]+"), "_")
+        .trim('_'),
+    )
+    append('_')
+    append(System.currentTimeMillis())
+  }
+  return "${rawLabel.ifBlank { "ASHOKVATIKA_invoice" }}.pdf"
+}
+
 @Composable
 private fun rememberDecodedImage(
   uriString: String?,
   maxDimensionPx: Int = 1280,
 ): State<ImageBitmap?> {
   val context = LocalContext.current
-  return produceState<ImageBitmap?>(initialValue = null, uriString, maxDimensionPx) {
+  val cacheKey = remember(uriString, maxDimensionPx) { uriString?.let { "$it|$maxDimensionPx" } }
+  return produceState<ImageBitmap?>(initialValue = null, cacheKey) {
     value = if (uriString.isNullOrBlank()) {
       null
     } else {
-      withContext(Dispatchers.IO) {
-        decodeImageBitmap(context, uriString.toUri(), maxDimensionPx)
-      }
+      val cachedBitmap = cacheKey?.let { DecodedBitmapCache.get(it) }
+      (cachedBitmap ?: withContext(Dispatchers.IO) {
+        decodeImageBitmap(context, uriString.toUri(), maxDimensionPx)?.also { decoded ->
+          cacheKey?.let { DecodedBitmapCache.put(it, decoded) }
+        }
+      })?.asImageBitmap()
     }
   }
 }
@@ -8361,7 +13715,7 @@ private fun decodeImageBitmap(
   context: android.content.Context,
   uri: Uri,
   maxDimensionPx: Int,
-): ImageBitmap? {
+): Bitmap? {
   return try {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
       val source = ImageDecoder.createSource(context.contentResolver, uri)
@@ -8379,7 +13733,7 @@ private fun decodeImageBitmap(
             )
           }
         }
-      }.asImageBitmap()
+      }
     } else {
       val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
       context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -8393,7 +13747,7 @@ private fun decodeImageBitmap(
         )
       }
       context.contentResolver.openInputStream(uri)?.use { stream ->
-        BitmapFactory.decodeStream(stream, null, sampledOptions)?.asImageBitmap()
+        BitmapFactory.decodeStream(stream, null, sampledOptions)
       }
     }
   } catch (_: IOException) {
@@ -8417,16 +13771,44 @@ private fun calculateInSampleSize(
   return sampleSize.coerceAtLeast(1)
 }
 
+private object DecodedBitmapCache {
+  private val cache = object : LruCache<String, Bitmap>(
+    (Runtime.getRuntime().maxMemory() / 16L).coerceAtMost(32L * 1024 * 1024).toInt(),
+  ) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+  }
+
+  fun get(key: String): Bitmap? = synchronized(cache) { cache.get(key) }
+
+  fun put(key: String, bitmap: Bitmap) {
+    synchronized(cache) {
+      cache.put(key, bitmap)
+    }
+  }
+}
+
+private object MediaTypeCache {
+  val videoTypes = ConcurrentHashMap<String, Boolean>()
+}
+
 @Composable
 private fun DashboardTile(
   title: String,
   fontFamily: FontFamily,
   tileWidth: Dp,
-  icon: BrandButtonIcon,
+  icon: BrandButtonIcon?,
   delayMillis: Int,
   animateTiles: Boolean,
+  baseColor: Color = Accent,
   onClick: () -> Unit,
 ) {
+  val titleFontSize = when {
+    tileWidth >= 270.dp && icon == null -> 36.sp
+    tileWidth >= 250.dp && icon == null -> 33.sp
+    tileWidth >= 250.dp -> 31.sp
+    icon == null -> 30.sp
+    else -> 28.sp
+  }
   val tileAlpha by animateFloatAsState(
     targetValue = if (animateTiles) 1f else 0f,
     animationSpec = tween(durationMillis = 780, delayMillis = delayMillis, easing = FastOutSlowInEasing),
@@ -8450,7 +13832,7 @@ private fun DashboardTile(
   val interactionSource = remember { MutableInteractionSource() }
   val isPressed by interactionSource.collectIsPressedAsState()
   val tileColor by animateColorAsState(
-    targetValue = if (isPressed) AccentGreen else Accent,
+    targetValue = if (isPressed) AccentGreen else baseColor,
     animationSpec = tween(durationMillis = 180),
     label = "$title-tile-color",
   )
@@ -8480,14 +13862,16 @@ private fun DashboardTile(
   ) {
     Column(
       horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(if (icon == null) 0.dp else 8.dp),
     ) {
-      BrandButtonGlyph(
-        kind = icon,
-        modifier = Modifier
-          .size((tileWidth * 0.29f).coerceAtLeast(48.dp))
-          .alpha(tileAlpha),
-      )
+      if (icon != null) {
+        BrandButtonGlyph(
+          kind = icon,
+          modifier = Modifier
+            .size((tileWidth * 0.29f).coerceAtLeast(48.dp))
+            .alpha(tileAlpha),
+        )
+      }
 
       Text(
         text = title,
@@ -8497,7 +13881,7 @@ private fun DashboardTile(
         style = TextStyle(
           fontFamily = fontFamily,
           fontWeight = FontWeight.Thin,
-          fontSize = 28.sp,
+          fontSize = titleFontSize,
           letterSpacing = 0.2.sp,
         ),
       )
@@ -8524,12 +13908,16 @@ private fun isVideoUri(
   context: android.content.Context,
   uriString: String,
 ): Boolean {
-  return try {
-    val uri = uriString.toUri()
-    val contentType = context.contentResolver.getType(uri).orEmpty()
-    contentType.startsWith("video/") || uriString.substringAfterLast('.', "").lowercase(Locale.US) in setOf("mp4", "mov", "m4v", "avi", "mkv", "webm")
-  } catch (_: Exception) {
-    false
+  return MediaTypeCache.videoTypes[uriString] ?: run {
+    val isVideo = try {
+      val uri = uriString.toUri()
+      val contentType = context.contentResolver.getType(uri).orEmpty()
+      contentType.startsWith("video/") || uriString.substringAfterLast('.', "").lowercase(Locale.US) in setOf("mp4", "mov", "m4v", "avi", "mkv", "webm")
+    } catch (_: Exception) {
+      false
+    }
+    MediaTypeCache.videoTypes[uriString] = isVideo
+    isVideo
   }
 }
 
@@ -8603,7 +13991,11 @@ private fun InventoryItem.toProductDetail(): ProductDetail {
     rent = rent,
     details = details,
     price = price,
+    landingPrice = landingPrice,
     checkout = checkout,
+    vendorName = vendorName,
+    vendorPhone = vendorPhone,
+    vendorEmail = vendorEmail,
     imageUri = imageUri,
     mediaUris = mediaUris.ifEmpty { listOfNotNull(imageUri) },
     templatePrimaryTitle = templatePrimaryTitle,
@@ -8625,7 +14017,11 @@ private fun buildInventoryItem(
   detailsText: String,
   selectedDetailsDate: String,
   unitPrice: Int,
+  landingPrice: String,
   checkoutDisplay: String,
+  vendorName: String,
+  vendorPhone: String,
+  vendorEmail: String,
   selectedMediaUris: List<String>,
   templatePrimaryTitle: String,
   templatePrimaryDescription: String,
@@ -8644,11 +14040,15 @@ private fun buildInventoryItem(
     rent = rentText.ifBlank { "0" },
     details = if (detailsText.isBlank()) selectedDetailsDate else detailsText,
     price = unitPrice.toString(),
+    landingPrice = landingPrice.filter(Char::isDigit).orZero(),
     checkout = checkoutDisplay.filter(Char::isDigit),
+    vendorName = vendorName.trim(),
+    vendorPhone = vendorPhone.filter(Char::isDigit),
+    vendorEmail = vendorEmail.trim(),
     imageUri = primaryMediaUri,
     mediaUris = selectedMediaUris,
     status = status,
-    templatePrimaryTitle = templatePrimaryTitle,
+    templatePrimaryTitle = productName.ifBlank { templatePrimaryTitle.ifBlank { seed.name } },
     templatePrimaryDescription = templatePrimaryDescription,
     templateSecondaryTitle = templateSecondaryTitle,
     templateSecondaryDescription = templateSecondaryDescription,
@@ -8667,5 +14067,6 @@ private fun rememberDashboardFont(): FontFamily {
     Font(R.font.dm_sans_regular, weight = FontWeight.Normal),
   )
 }
+
 
 

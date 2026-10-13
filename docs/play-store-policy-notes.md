@@ -17,7 +17,15 @@ Update the following in both policy files before publishing:
 
 ## Keep Play Console consistent
 
-The Google Play Data safety form must match the app’s actual behavior and the privacy policy.
+The Google Play Data safety form must match the app's actual behavior and the privacy policy.
+
+The Google Play target audience selection must also match the policy text. The current intended audience is:
+
+- **Ages 13-15**
+- **Ages 16-17**
+- **Ages 18 and above**
+
+The app should **not** be represented as intended for children under 13.
 
 Based on the current codebase, review disclosures for:
 
@@ -31,3 +39,5 @@ Based on the current codebase, review disclosures for:
 - User Data policy: [support.google.com/googleplay/android-developer/answer/10144311](https://support.google.com/googleplay/android-developer/answer/10144311)
 - Data safety form guidance: [support.google.com/googleplay/android-developer/answer/10787469](https://support.google.com/googleplay/android-developer/answer/10787469)
 - Sensitive permissions and file/media access guidance: [support.google.com/googleplay/android-developer/answer/9888170](https://support.google.com/googleplay/android-developer/answer/9888170)
+- Families policy: [support.google.com/googleplay/android-developer/answer/9893335](https://support.google.com/googleplay/android-developer/answer/9893335)
+- Target audience settings guidance: [support.google.com/googleplay/android-developer/answer/9867159](https://support.google.com/googleplay/android-developer/answer/9867159)

@@ -1,5 +1,8 @@
 package com.ashokvatika.ui.components
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
@@ -12,8 +15,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.ashokvatika.app.R
 
-val BrandOrange = Color(0xFFF17C32)
-val BrandGreen = Color(0xFF7CD84F)
+val BrandOrange = Color(0xFFE9782F)
+val BrandGreen = Color(0xFF5E9655)
 val BrandInk = Color(0xFF141414)
 
 enum class BrandButtonIcon {
@@ -21,6 +24,9 @@ enum class BrandButtonIcon {
   Plants,
   Pots,
   Supplies,
+  Docs,
+  Art,
+  Live,
 }
 
 @Composable
@@ -46,11 +52,24 @@ fun BrandButtonGlyph(
   primary: Color = Color.White,
   secondary: Color = Color.White.copy(alpha = 0.8f),
 ) {
+  if (kind == BrandButtonIcon.Live) {
+    Icon(
+      imageVector = Icons.Filled.Cloud,
+      contentDescription = null,
+      tint = primary,
+      modifier = modifier,
+    )
+    return
+  }
+
   val iconRes = when (kind) {
     BrandButtonIcon.OTC -> R.drawable.icon_otc
     BrandButtonIcon.Plants -> R.drawable.icon_plants
     BrandButtonIcon.Pots -> R.drawable.icon_pots
     BrandButtonIcon.Supplies -> R.drawable.icon_supplies
+    BrandButtonIcon.Docs -> R.drawable.icon_docs
+    BrandButtonIcon.Art -> R.drawable.icon_art
+    BrandButtonIcon.Live -> error("Live icon is rendered as a compose vector.")
   }
   Image(
     painter = painterResource(iconRes),
