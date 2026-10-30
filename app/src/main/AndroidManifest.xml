@@ -5,6 +5,10 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+  <permission
+    android:name="com.ashokvatika.permission.ACCESS_BRIDGE"
+    android:protectionLevel="signature" />
+
   <application
     android:allowBackup="true"
     android:dataExtractionRules="@xml/data_extraction_rules"
@@ -27,7 +31,8 @@
     <provider
       android:name="com.ashokvatika.data.LocalBridgeProvider"
       android:authorities="${localBridgeAuthority}"
-      android:exported="false"
+      android:exported="true"
+      android:permission="com.ashokvatika.permission.ACCESS_BRIDGE"
       android:grantUriPermissions="true" />
     <receiver
       android:name="com.ashokvatika.notifications.AdminApprovalActionReceiver"

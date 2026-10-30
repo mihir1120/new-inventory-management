@@ -30,8 +30,8 @@ fun List<CartProductItem>.mergeCartItems(additions: List<CartProductItem>): List
     }
   }
   val existingIds = map { it.id }.toSet()
-  val appended = additions.filter { it.id !in existingIds }
-  return map { item -> merged.getValue(item.id) } + appended
+  val appendedIds = additions.map { it.id }.distinct().filter { it !in existingIds }
+  return map { item -> merged.getValue(item.id) } + appendedIds.map(merged::getValue)
 }
 
 fun LiveCustomerSession.openCartRowId(): String {
