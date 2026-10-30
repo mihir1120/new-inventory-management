@@ -34,8 +34,11 @@ import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
@@ -51,6 +54,7 @@ import kotlin.coroutines.resumeWithException
 
 private const val AccessRequestsCollection = "access_requests"
 private const val InventoryCollection = "inventory_items"
+private const val CustomerCatalogCollection = "customer_catalog"
 private const val SavedDealsCollection = "saved_deals"
 private const val LiveSessionsCollection = "customer_live_sessions"
 private const val ProductQrPrefix = "ashokvatika://product/"
@@ -64,6 +68,12 @@ class LocalBridgeObservation(
   }
 }
 
+data class InventorySaveOutcome(
+  val cloudInventorySaved: Boolean,
+  val customerCatalogSaved: Boolean,
+  val warning: String? = null,
+)
+
 class AdminFirestoreRepository(
   private val context: Context,
 ) {
@@ -71,6 +81,7 @@ class AdminFirestoreRepository(
   private val firestore by lazy { Firebase.firestore }
   private val realtimeDatabase by lazy { Firebase.database.reference.child(AccessRequestsCollection) }
   private val inventoryDatabase by lazy { Firebase.database.reference.child(InventoryCollection) }
+  private val customerCatalogDatabase by lazy { Firebase.database.reference.child(CustomerCatalogCollection) }
   private val savedDealsDatabase by lazy { Firebase.database.reference.child(SavedDealsCollection) }
   private val liveSessionsDatabase by lazy { Firebase.database.reference.child(LiveSessionsCollection) }
 
@@ -112,16 +123,15 @@ class AdminFirestoreRepository(
   ): LocalBridgeObservation {
     val realtimeItems = mutableMapOf<String, InventoryItem>()
     val firestoreItems = mutableMapOf<String, InventoryItem>()
+    val attemptedMigrationIds = mutableSetOf<String>()
+    var didBackfillCustomerCatalog = false
 
     fun publishMergedItems() {
       val items = (realtimeItems.values + firestoreItems.values)
-        .associateBy { it.id }
+        .groupBy { it.id }
         .values
-        .sortedWith(
-          compareBy<InventoryItem> { it.category.title }
-            .thenByDescending { it.id.inventorySequence() }
-            .thenBy { it.name.lowercase(Locale.US) },
-        )
+        .map { versions -> versions.maxBy { it.updatedAt.timestampSortKey() } }
+        .sortedByMostRecentInventory()
       // An empty first snapshot can mean that Firebase is still loading or that this
       // install has no remote data yet. Keep the local cache until an actual item
       // arrives; explicit item deletion already removes it from the local bridge.
@@ -130,9 +140,18 @@ class AdminFirestoreRepository(
         cacheIoScope.launch {
           runCatching {
             val cachedItems = loadBridgeInventory()
-            val merged = (cachedItems + snapshotItems).associateBy { it.id }.values.toList()
-            if (merged.toSet() != cachedItems.toSet()) {
-              replaceInventoryBridgeSnapshot(merged)
+            val merged = (cachedItems + snapshotItems).groupBy { it.id }.values
+              .map { versions -> versions.maxBy { it.updatedAt.timestampSortKey() } }
+            val cachedById = cachedItems.associateBy { it.id }
+            merged.filter { item -> cachedById[item.id] != item }.forEach { item ->
+              upsertInventoryBridgeItem(
+                item = item,
+                updatedAt = item.updatedAt.ifBlank { currentTimestamp() },
+                stockCount = ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) -
+                  (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0),
+                imageBase64 = resolvePreviewImageBase64(item, context.contentResolver),
+                qrCodeValue = "$ProductQrPrefix${item.id}",
+              )
             }
           }.onFailure { error ->
             Log.w(BridgeLogTag, "Unable to mirror inventory snapshot locally", error)
@@ -148,6 +167,34 @@ class AdminFirestoreRepository(
         snapshot.children
           .mapNotNull { child -> child.toRealtimeInventoryItem() }
           .forEach { item -> realtimeItems[item.id] = item }
+        // Add a safe, customer-readable copy of existing inventory once. This is
+        // additive and never clears or rewrites the protected inventory branch.
+        val existingItems = realtimeItems.values.toList()
+        if (!didBackfillCustomerCatalog && existingItems.isNotEmpty()) {
+          didBackfillCustomerCatalog = true
+          cacheIoScope.launch {
+            runCatching { publishCustomerCatalogItems(existingItems) }
+              .onFailure { error -> Log.w(BridgeLogTag, "Customer catalog backfill failed", error) }
+          }
+        }
+        // Inventory created before Firebase was connected can still be in the
+        // admin's local bridge. Insert only IDs absent in RTDB; transactions
+        // leave every existing cloud item untouched.
+        val cloudIds = realtimeItems.keys.toSet()
+        cacheIoScope.launch {
+          val localOnlyItems = runCatching { loadBridgeInventory() }
+            .getOrDefault(emptyList()).filter { item ->
+              item.id !in cloudIds && synchronized(attemptedMigrationIds) {
+                attemptedMigrationIds.add(item.id)
+              }
+            }
+          if (localOnlyItems.isNotEmpty()) {
+            localOnlyItems.forEach { item ->
+              runCatching { migrateInventoryItemIfMissing(item) }
+                .onFailure { error -> Log.w(BridgeLogTag, "Local inventory migration failed for ${item.id}", error) }
+            }
+          }
+        }
         publishMergedItems()
       }
 
@@ -160,7 +207,7 @@ class AdminFirestoreRepository(
     val firestoreRegistration = firestore.collection(InventoryCollection)
       .addSnapshotListener { snapshot, error ->
         if (error != null) {
-          onError(error)
+          Log.w(BridgeLogTag, "Optional Firestore inventory listener unavailable; using Realtime Database", error)
           return@addSnapshotListener
         }
 
@@ -211,7 +258,7 @@ class AdminFirestoreRepository(
     val firestoreRegistration = firestore.collection(AccessRequestsCollection)
       .addSnapshotListener { snapshot, error ->
         if (error != null) {
-          onError(error)
+          Log.w(BridgeLogTag, "Optional Firestore access-request listener unavailable; using Realtime Database", error)
           return@addSnapshotListener
         }
 
@@ -296,11 +343,20 @@ class AdminFirestoreRepository(
     onUpdate: (List<InventoryItem>) -> Unit,
     onError: (Throwable) -> Unit,
   ): LocalBridgeObservation {
+    var refreshJob: Job? = null
+    fun refresh() {
+      refreshJob?.cancel()
+      refreshJob = cacheIoScope.launch {
+        // Coalesce a burst of provider notifications from spreadsheet imports.
+        delay(40)
+        runCatching { loadBridgeInventory() }
+          .onSuccess { items -> withContext(Dispatchers.Main.immediate) { onUpdate(items) } }
+          .onFailure { error -> withContext(Dispatchers.Main.immediate) { onError(error) } }
+      }
+    }
     val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
       override fun onChange(selfChange: Boolean) {
-        runCatching {
-          loadBridgeInventory()
-        }.onSuccess(onUpdate).onFailure(onError)
+        refresh()
       }
     }
 
@@ -310,8 +366,9 @@ class AdminFirestoreRepository(
         true,
         observer,
       )
-      onUpdate(loadBridgeInventory())
+      refresh()
       LocalBridgeObservation {
+        refreshJob?.cancel()
         context.contentResolver.unregisterContentObserver(observer)
       }
     }.getOrElse { error ->
@@ -385,7 +442,7 @@ class AdminFirestoreRepository(
     val firestoreRegistration = firestore.collection(SavedDealsCollection)
       .addSnapshotListener { snapshot, error ->
         if (error != null) {
-          onError(error)
+          Log.w(BridgeLogTag, "Optional Firestore saved-deal listener unavailable; using Realtime Database", error)
           return@addSnapshotListener
         }
 
@@ -402,31 +459,45 @@ class AdminFirestoreRepository(
     }
   }
 
-  suspend fun upsertInventoryItem(item: InventoryItem) {
+  suspend fun upsertInventoryItem(item: InventoryItem): InventorySaveOutcome {
+    val wasComplete = withContext(Dispatchers.IO) {
+      context.contentResolver.query(
+        LocalBridgeContract.Inventory.itemUri(item.id),
+        arrayOf(LocalBridgeContract.Inventory.Status),
+        null,
+        null,
+        null,
+      )?.use { cursor -> cursor.moveToFirst() && cursor.getString(0) == "complete" } ?: false
+    }
     val timestamp = currentTimestamp()
     val stockCount =
       ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
     val qrCodeValue = "${ProductQrPrefix}${item.id}"
-    val imageBase64 = resolvePreviewImageBase64(item, context.contentResolver)
-
-    upsertInventoryBridgeItem(
-      item = item,
-      updatedAt = timestamp,
-      stockCount = stockCount,
-      imageBase64 = imageBase64,
-      qrCodeValue = qrCodeValue,
-    )
+    withContext(Dispatchers.IO) {
+      val imageBase64 = resolvePreviewImageBase64(item, context.contentResolver)
+      upsertInventoryBridgeItem(item, timestamp, stockCount, imageBase64, qrCodeValue)
+    }
 
     val inventoryPayload = item.toRemoteInventoryPayload(
       updatedAt = timestamp,
       stockCount = stockCount,
       qrCodeValue = qrCodeValue,
     )
-
     val realtimeUpdateResult = runCatching {
       inventoryDatabase.child(item.id).setValue(inventoryPayload).await()
     }.onFailure { error ->
       Log.w(BridgeLogTag, "Realtime inventory save failed for ${item.id}", error)
+    }
+
+    val customerCatalogResult = runCatching {
+      if (item.status == "complete") {
+        customerCatalogDatabase.child(item.id)
+          .setValue(item.toCustomerCatalogPayload(stockCount, qrCodeValue)).await()
+      } else if (wasComplete) {
+        customerCatalogDatabase.child(item.id).removeValue().await()
+      }
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Customer catalog save failed for ${item.id}", error)
     }
 
     val firestoreUpdateResult = runCatching {
@@ -438,11 +509,15 @@ class AdminFirestoreRepository(
       Log.w(BridgeLogTag, "Firestore inventory save failed for ${item.id}", error)
     }
 
-    if (realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
-      throw realtimeUpdateResult.exceptionOrNull()
-        ?: firestoreUpdateResult.exceptionOrNull()
-        ?: IllegalStateException("Unable to save inventory item ${item.id}")
+    val cloudSaved = realtimeUpdateResult.isSuccess || firestoreUpdateResult.isSuccess
+    val warning = when {
+      !cloudSaved -> "Saved on this device; Firebase inventory sync was denied: " +
+        (realtimeUpdateResult.exceptionOrNull()?.message ?: firestoreUpdateResult.exceptionOrNull()?.message ?: "Unknown error")
+      customerCatalogResult.isFailure -> "Saved to admin inventory; customer catalog sync was denied: " +
+        (customerCatalogResult.exceptionOrNull()?.message ?: "Unknown error")
+      else -> null
     }
+    return InventorySaveOutcome(cloudSaved, customerCatalogResult.isSuccess, warning)
   }
 
   suspend fun cacheInventoryItem(item: InventoryItem) {
@@ -483,7 +558,10 @@ class AdminFirestoreRepository(
       Log.w(BridgeLogTag, "Firestore saved deal save failed for ${deal.id}", error)
     }
 
-    if (realtimeUpdateResult.isFailure || firestoreUpdateResult.isFailure) {
+    // Realtime Database is the active cloud source for the customer/admin apps;
+    // Firestore is an additional mirror. Keep the local deal pending only when
+    // neither cloud destination accepted it.
+    if (realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
       throw realtimeUpdateResult.exceptionOrNull()
         ?: firestoreUpdateResult.exceptionOrNull()
         ?: IllegalStateException("Unable to save deal ${deal.id}")
@@ -500,6 +578,11 @@ class AdminFirestoreRepository(
     }.onFailure { error ->
       Log.w(BridgeLogTag, "Realtime inventory delete failed for $itemId", error)
     }
+    val customerCatalogDeleteResult = runCatching {
+      customerCatalogDatabase.child(itemId).removeValue().await()
+    }.onFailure { error ->
+      Log.w(BridgeLogTag, "Customer catalog delete failed for $itemId", error)
+    }
     val firestoreDeleteResult = runCatching {
       firestore.collection(InventoryCollection)
         .document(itemId)
@@ -512,6 +595,54 @@ class AdminFirestoreRepository(
       throw realtimeDeleteResult.exceptionOrNull()
         ?: firestoreDeleteResult.exceptionOrNull()
         ?: IllegalStateException("Unable to delete inventory item $itemId")
+    }
+    if (realtimeDeleteResult.isSuccess && customerCatalogDeleteResult.isFailure) {
+      throw customerCatalogDeleteResult.exceptionOrNull()
+        ?: IllegalStateException("Unable to remove item $itemId from customer catalog")
+    }
+  }
+
+  private suspend fun publishCustomerCatalogItems(items: List<InventoryItem>) {
+    val updates = items.filter { it.status == "complete" }.associate { item ->
+      val stock = ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
+      item.id to item.toCustomerCatalogPayload(stock, "${ProductQrPrefix}${item.id}")
+    }
+    if (updates.isNotEmpty()) customerCatalogDatabase.updateChildren(updates).await()
+  }
+
+  private suspend fun migrateInventoryItemIfMissing(item: InventoryItem) {
+    val stock = ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
+    val payload = item.toRemoteInventoryPayload(currentTimestamp(), stock, "${ProductQrPrefix}${item.id}")
+    suspendCancellableCoroutine { continuation ->
+      inventoryDatabase.child(item.id).runTransaction(object : Transaction.Handler {
+        override fun doTransaction(currentData: MutableData): Transaction.Result {
+          if (currentData.value == null) currentData.value = payload
+          return Transaction.success(currentData)
+        }
+
+        override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
+          if (!continuation.isActive) return
+          if (error != null) {
+            continuation.resumeWithException(error.toException())
+            return
+          }
+          val authoritativeItem = currentData?.toRealtimeInventoryItem()
+          if (committed && authoritativeItem != null) {
+            val authoritativeStock = ((authoritativeItem.batch.toIntOrNull() ?: 0) -
+              (authoritativeItem.sale.toIntOrNull() ?: 0) - (authoritativeItem.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
+            cacheIoScope.launch {
+              runCatching {
+                customerCatalogDatabase.child(authoritativeItem.id)
+                  .setValue(authoritativeItem.toCustomerCatalogPayload(authoritativeStock, "${ProductQrPrefix}${authoritativeItem.id}"))
+                  .await()
+              }.onFailure { catalogError ->
+                Log.w(BridgeLogTag, "Migrated item catalog publish failed for ${authoritativeItem.id}", catalogError)
+              }
+            }
+          }
+          continuation.resume(Unit)
+        }
+      }, false)
     }
   }
 
@@ -527,7 +658,7 @@ class AdminFirestoreRepository(
     val status = if (approved) "approved" else "denied"
     val note = if (approved) "Approved by admin" else "Denied by admin"
 
-    runCatching {
+    val bridgeUpdateResult = runCatching {
       context.contentResolver.update(
         LocalBridgeContract.AccessRequests.itemUri(requestId),
         ContentValues().apply {
@@ -541,6 +672,7 @@ class AdminFirestoreRepository(
     }.onFailure { error ->
       Log.w(BridgeLogTag, "Local access request bridge update failed for $requestId", error)
     }
+    val bridgeUpdateSucceeded = bridgeUpdateResult.getOrNull()?.let { it > 0 } == true
 
     val realtimeUpdateResult = runCatching {
       realtimeDatabase.child(requestId).updateChildren(
@@ -570,7 +702,7 @@ class AdminFirestoreRepository(
       Log.w(BridgeLogTag, "Firestore access request update failed for $requestId", error)
     }
 
-    if (realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
+    if (!bridgeUpdateSucceeded && realtimeUpdateResult.isFailure && firestoreUpdateResult.isFailure) {
       throw firestoreUpdateResult.exceptionOrNull()
         ?: realtimeUpdateResult.exceptionOrNull()
         ?: IllegalStateException("Unable to update access request $requestId")
@@ -609,7 +741,7 @@ class AdminFirestoreRepository(
       ContentProviderOperation.newDelete(LocalBridgeContract.Inventory.ContentUri).build(),
     )
     items.forEach { item ->
-      val updatedAt = currentTimestamp()
+      val updatedAt = item.updatedAt.ifBlank { currentTimestamp() }
       val stockCount =
         ((item.batch.toIntOrNull() ?: 0) - (item.sale.toIntOrNull() ?: 0) - (item.rent.toIntOrNull() ?: 0)).coerceAtLeast(0)
       val qrCodeValue = "${ProductQrPrefix}${item.id}"
@@ -686,12 +818,7 @@ class AdminFirestoreRepository(
           cursor.toBridgeInventoryItem()?.let(::add)
         }
       }
-    }.orEmpty()
-      .sortedWith(
-        compareBy<InventoryItem> { it.category.title }
-          .thenByDescending { it.id.inventorySequence() }
-          .thenBy { it.name.lowercase(Locale.US) },
-      )
+    }.orEmpty().sortedByMostRecentInventory()
   }
 
   private fun loadBridgeLiveCustomerSessions(): List<LiveCustomerSession> {
@@ -830,6 +957,7 @@ private fun Cursor.toBridgeInventoryItem(): InventoryItem? {
     templateSecondaryTitle = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateSecondaryTitle),
     templateSecondaryDescription = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateSecondaryDescription),
     templateContact = getStringOrEmpty(LocalBridgeContract.Inventory.TemplateContact),
+    updatedAt = getStringOrEmpty(LocalBridgeContract.Inventory.UpdatedAt),
   )
 }
 
@@ -937,6 +1065,7 @@ private fun DataSnapshot.toRealtimeInventoryItem(): InventoryItem? {
     templateSecondaryTitle = stringValue("templateSecondaryTitle").orEmpty(),
     templateSecondaryDescription = stringValue("templateSecondaryDescription").orEmpty(),
     templateContact = stringValue("templateContact").orEmpty(),
+    updatedAt = stringValue("updatedAt").orEmpty(),
   )
 }
 
@@ -1034,6 +1163,21 @@ private fun InventoryItem.toRemoteInventoryPayload(
   )
 }
 
+/** Public product fields only; supplier contacts, cost, checkout and local media URIs stay private. */
+private fun InventoryItem.toCustomerCatalogPayload(
+  stockCount: Int,
+  qrCodeValue: String,
+): Map<String, Any?> = mapOf(
+  "id" to id,
+  "category" to category.title,
+  "name" to name,
+  "details" to details,
+  "price" to price.orZero(),
+  "stockCount" to stockCount,
+  "qrCodeValue" to qrCodeValue,
+  "status" to status.ifBlank { "complete" },
+)
+
 private fun SavedDeal.toRemoteSavedDealPayload(updatedAt: String): Map<String, Any?> {
   return mapOf(
     "id" to id,
@@ -1096,6 +1240,7 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toInventoryItem(): In
     templateSecondaryTitle = getString("templateSecondaryTitle").orEmpty(),
     templateSecondaryDescription = getString("templateSecondaryDescription").orEmpty(),
     templateContact = getString("templateContact").orEmpty(),
+    updatedAt = getString("updatedAt").orEmpty(),
   )
 }
 
@@ -1225,6 +1370,12 @@ private fun String?.orZero(): String {
 private fun String.inventorySequence(): Long {
   return substringAfterLast('-').toLongOrNull() ?: 0L
 }
+
+internal fun List<InventoryItem>.sortedByMostRecentInventory(): List<InventoryItem> = sortedWith(
+  compareBy<InventoryItem> { it.category.title }
+    .thenByDescending { it.id.inventorySequence().takeIf { sequence -> sequence > 0L } ?: it.updatedAt.timestampSortKey() }
+    .thenBy { it.name.lowercase(Locale.US) },
+)
 
 private fun String?.timestampSortKey(): Long {
   return parseBridgeTimestampMillis(this) ?: 0L

@@ -22,7 +22,20 @@ data class InventoryItem(
   val templateSecondaryTitle: String = "",
   val templateSecondaryDescription: String = "",
   val templateContact: String = "",
-)
+  val updatedAt: String = "",
+) {
+  // Imported IDs remain stable across local storage, Firebase sync, and later edits.
+  val isVendorSpreadsheetUpload: Boolean
+    get() = id.startsWith("vendor-upload-") ||
+      LegacySpreadsheetId.matches(id)
+
+  private companion object {
+    // Imports created before the explicit prefix used category + UUID + timestamp.
+    val LegacySpreadsheetId = Regex(
+      "^[a-z_]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9]+$",
+    )
+  }
+}
 
 data class CartProductItem(
   val id: String,

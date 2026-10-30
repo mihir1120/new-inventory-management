@@ -93,6 +93,8 @@ dependencies {
   implementation("com.google.firebase:firebase-database-ktx")
   implementation("com.google.firebase:firebase-config-ktx")
   implementation("com.google.firebase:firebase-firestore-ktx")
+  implementation("com.google.zxing:core:3.5.3")
+  implementation("org.apache.poi:poi:3.17")
 
   debugImplementation("androidx.compose.ui:ui-tooling")
   debugImplementation("androidx.compose.ui:ui-test-manifest")

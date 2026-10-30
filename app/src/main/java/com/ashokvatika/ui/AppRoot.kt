@@ -11,7 +11,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -31,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.ashokvatika.domain.model.AdminAccessRequest
 import com.ashokvatika.data.AdminAuthStore
 import com.ashokvatika.data.AdminFirestoreRepository
@@ -70,6 +74,9 @@ import com.ashokvatika.ui.admin.OtcScreen
 import com.ashokvatika.ui.admin.SavedDealsScreen
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
 private enum class Route {
@@ -98,7 +105,7 @@ private enum class Route {
 fun AppRoot() {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
-  val auth = remember { FirebaseAuth.getInstance().apply { signOut() } }
+  val auth = remember { FirebaseAuth.getInstance() }
   val authStore = remember(context) { AdminAuthStore(context.applicationContext) }
   authStore.clearObsoleteFirebaseSessionOnce()
   val firestoreRepository = remember(context) { AdminFirestoreRepository(context.applicationContext) }
@@ -119,12 +126,18 @@ fun AppRoot() {
   val bridgePendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
   val remotePendingAccessRequests = remember { mutableStateListOf<AdminAccessRequest>() }
   var adminSyncMessage by remember { mutableStateOf<String?>(null) }
+  var inventorySaveWarning by remember { mutableStateOf<String?>(null) }
   val liveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
   val bridgeLiveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
   val remoteLiveCustomerSessions = remember { mutableStateListOf<LiveCustomerSession>() }
   var liveSyncMessage by remember { mutableStateOf<String?>(null) }
   val openCartRows = remember { mutableStateListOf<OpenCartRow>() }
-  val savedDeals = remember { mutableStateListOf<SavedDeal>().apply { addAll(firestoreRepository.loadSavedDealsLocally()) } }
+  val savedDeals = remember { mutableStateListOf<SavedDeal>() }
+  LaunchedEffect(firestoreRepository) {
+    val localDeals = withContext(Dispatchers.IO) { firestoreRepository.loadSavedDealsLocally() }
+    savedDeals.clear()
+    savedDeals.addAll(localDeals)
+  }
   var cartRowCounter by remember { mutableIntStateOf(1) }
   var savedDealCounter by remember { mutableIntStateOf(nextInvoiceCounter(savedDeals)) }
   var clientName by remember { mutableStateOf("") }
@@ -133,9 +146,53 @@ fun AppRoot() {
   var transactionCode by remember { mutableStateOf(generateTransactionCode(savedDealCounter)) }
   var syncedCartSessionId by remember { mutableStateOf<String?>(null) }
   var lastNotifiedRequestId by rememberSaveable { mutableStateOf<String?>(null) }
-  val hasFirebaseSession = auth.currentUser != null
-  LiveInventoryCatalog.inventoryByDestination = inventory.mapValues { entry -> entry.value.toList() }
-  val currentInventorySnapshot = inventory.values.flatten()
+  var hasFirebaseSession by remember(auth) { mutableStateOf(false) }
+  var showFirebaseSignInDialog by rememberSaveable { mutableStateOf(false) }
+  var firebaseEmail by rememberSaveable { mutableStateOf("") }
+  var firebasePassword by rememberSaveable { mutableStateOf("") }
+  var firebaseSignInError by remember { mutableStateOf<String?>(null) }
+  var firebaseSignInBusy by remember { mutableStateOf(false) }
+
+  DisposableEffect(auth) {
+    val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+      val user = firebaseAuth.currentUser
+      if (user == null) {
+        hasFirebaseSession = false
+      } else {
+        scope.launch {
+          val isAuthorizedAdmin = runCatching {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+              .reference
+              .child("adminUsers")
+              .child(user.uid)
+              .get()
+              .await()
+              .getValue(Boolean::class.java) == true
+          }.getOrElse { error ->
+            adminSyncMessage = "Firebase admin access check failed: ${error.message ?: "Unable to verify this account."}"
+            false
+          }
+          hasFirebaseSession = isAuthorizedAdmin
+          if (!isAuthorizedAdmin && adminSyncMessage.isNullOrBlank()) {
+            adminSyncMessage = "Firebase account is signed in but is not enabled for admin access yet."
+          } else if (isAuthorizedAdmin) {
+            adminSyncMessage = null
+          }
+        }
+      }
+    }
+    auth.addAuthStateListener(authStateListener)
+    onDispose { auth.removeAuthStateListener(authStateListener) }
+  }
+  val inventoryStateSnapshot = inventory.toMap()
+  val inventoryByDestination = remember(inventoryStateSnapshot) {
+    inventoryStateSnapshot.mapValues { (_, items) -> items.toList() }
+  }
+  val currentInventorySnapshot = remember(inventoryStateSnapshot) {
+    inventoryStateSnapshot.values.flatten()
+  }
+  LiveInventoryCatalog.inventoryByDestination = inventoryByDestination
+  val liveSessionsSnapshot = liveCustomerSessions.toList()
   val activeLiveSessionsForCart = liveCustomerSessions.filter { session -> session.isLoggedIn }
   val cartItemCount = openCartRows.size + activeLiveSessionsForCart.count { session ->
     openCartRows.none { row -> row.id == session.openCartRowId() }
@@ -217,7 +274,7 @@ fun AppRoot() {
   LaunchedEffect(hasFirebaseSession) {
     if (hasFirebaseSession) {
       authStore.setActiveSession(true)
-      firestoreRepository.loadSavedDealsLocally(pendingOnly = true).forEach { deal ->
+      withContext(Dispatchers.IO) { firestoreRepository.loadSavedDealsLocally(pendingOnly = true) }.forEach { deal ->
         runCatching { firestoreRepository.upsertSavedDeal(deal) }.onFailure {
           adminSyncMessage = "Saved deal is on this device; cloud sync failed: ${it.message}"
         }
@@ -238,7 +295,7 @@ fun AppRoot() {
     lastNotifiedRequestId = incomingRequest.requestId
   }
 
-  LaunchedEffect(liveCustomerSessions.toList(), currentInventorySnapshot) {
+  LaunchedEffect(liveSessionsSnapshot, currentInventorySnapshot) {
     syncLiveSessionsToOpenCart()
   }
 
@@ -355,6 +412,38 @@ fun AppRoot() {
     }
   }
 
+  fun handleFirebaseAction() {
+    if (auth.currentUser != null) {
+      auth.signOut()
+      adminSyncMessage = "Firebase disconnected. Local admin data remains available on this device."
+    } else {
+      firebaseSignInError = null
+      showFirebaseSignInDialog = true
+    }
+  }
+
+  fun submitFirebaseSignIn() {
+    if (firebaseSignInBusy) return
+    val email = firebaseEmail.trim()
+    if (email.isBlank() || firebasePassword.isBlank()) {
+      firebaseSignInError = "Enter the admin email and password."
+      return
+    }
+    firebaseSignInBusy = true
+    firebaseSignInError = null
+    scope.launch {
+      runCatching { auth.signInWithEmailAndPassword(email, firebasePassword).await() }
+        .onSuccess {
+          showFirebaseSignInDialog = false
+          firebasePassword = ""
+        }
+        .onFailure { error ->
+          firebaseSignInError = error.localizedMessage ?: "Firebase sign-in failed. Check the email and password."
+        }
+      firebaseSignInBusy = false
+    }
+  }
+
   Box(modifier = Modifier.fillMaxSize()) {
     when (route) {
       Route.Landing -> LandingLoginScreen(
@@ -366,7 +455,9 @@ fun AppRoot() {
 
       Route.AdminHome -> AdminHomeScreen(
         pendingAccessRequests = pendingAccessRequests,
-        syncMessage = adminSyncMessage,
+        syncMessage = inventorySaveWarning ?: adminSyncMessage,
+        firebaseConnected = hasFirebaseSession,
+        onFirebaseAction = ::handleFirebaseAction,
         onApproveRequest = { requestId -> handleRequestDecision(requestId, true) },
         onDenyRequest = { requestId -> handleRequestDecision(requestId, false) },
         onTileClick = { destination ->
@@ -643,9 +734,39 @@ fun AppRoot() {
           title = activeInventory,
           items = items,
           onBack = { route = Route.AdminHome },
+          onHome = { route = Route.AdminHome },
           onAddItem = {
             editingItemId = null
             route = Route.InventoryEditor
+          },
+          onImportItems = { importedItems ->
+            importedItems.groupBy { it.category }.forEach { (category, newItems) ->
+              inventory[category] = newItems.fold(inventory[category].orEmpty()) { current, item ->
+                current.upsert(item)
+              }
+            }
+            scope.launch {
+              var failed = 0
+              var cloudWarnings = 0
+              var firstWarning: String? = null
+              importedItems.forEach { item ->
+                runCatching { firestoreRepository.upsertInventoryItem(item) }
+                  .onSuccess { outcome ->
+                    if (outcome.warning != null) {
+                      cloudWarnings++
+                      if (firstWarning == null) firstWarning = outcome.warning
+                    }
+                  }
+                  .onFailure { failed++ }
+              }
+              val message = when {
+                failed > 0 -> "${importedItems.size - failed} products saved; $failed could not be saved."
+                cloudWarnings > 0 -> "${importedItems.size} products saved on this device; $cloudWarnings have a Firebase sync warning."
+                else -> "${importedItems.size} products imported."
+              }
+              inventorySaveWarning = firstWarning ?: if (failed > 0) message else null
+              Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
           },
           onItemTap = { item ->
             editingItemId = item.id
@@ -659,6 +780,7 @@ fun AppRoot() {
               firestoreRepository.deleteInventoryItem(item.id)
             }.onSuccess {
               adminSyncMessage = null
+              inventorySaveWarning = null
             }.onFailure { error ->
               adminSyncMessage = "Delete failed: ${error.message ?: "Item could not be removed from Firebase."}"
             }
@@ -672,6 +794,7 @@ fun AppRoot() {
         CategoryScreen(
           title = activeInventory,
           initialItem = currentItem,
+          onHome = { route = Route.AdminHome },
           onConfirmBack = { item ->
             inventory[activeInventory] = inventory[activeInventory].orEmpty().upsert(item)
             editingItemId = item.id
@@ -680,9 +803,10 @@ fun AppRoot() {
             scope.launch {
               runCatching {
                 firestoreRepository.upsertInventoryItem(item)
-              }.onSuccess {
-                adminSyncMessage = null
+              }.onSuccess { outcome ->
+                inventorySaveWarning = outcome.warning
               }.onFailure { error ->
+                inventorySaveWarning = null
                 adminSyncMessage = "Save failed: ${error.message ?: "Item could not be stored in Firebase."}"
               }
             }
@@ -695,13 +819,15 @@ fun AppRoot() {
             scope.launch {
               runCatching {
                 firestoreRepository.upsertInventoryItem(item)
-              }.onSuccess {
-                adminSyncMessage = null
+              }.onSuccess { outcome ->
+                inventorySaveWarning = outcome.warning
               }.onFailure { error ->
+                inventorySaveWarning = null
                 adminSyncMessage = "Save failed: ${error.message ?: "Item could not be stored in Firebase."}"
               }
             }
           },
+          onExitWithoutChanges = { route = Route.InventoryList },
         )
       }
     }
@@ -714,6 +840,46 @@ fun AppRoot() {
         onDenyRequest = { requestId -> handleRequestDecision(requestId, false) },
       )
     }
+  }
+
+  if (showFirebaseSignInDialog) {
+    AlertDialog(
+      onDismissRequest = { if (!firebaseSignInBusy) showFirebaseSignInDialog = false },
+      title = { Text("Connect admin to Firebase") },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Text("Sign in with the admin account created in Firebase Authentication.")
+          OutlinedTextField(
+            value = firebaseEmail,
+            onValueChange = { firebaseEmail = it; firebaseSignInError = null },
+            label = { Text("Admin email") },
+            singleLine = true,
+            enabled = !firebaseSignInBusy,
+          )
+          OutlinedTextField(
+            value = firebasePassword,
+            onValueChange = { firebasePassword = it; firebaseSignInError = null },
+            label = { Text("Password") },
+            singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            enabled = !firebaseSignInBusy,
+          )
+          firebaseSignInError?.let { error ->
+            Text(text = error, color = Color(0xFFB00020))
+          }
+        }
+      },
+      confirmButton = {
+        Button(onClick = ::submitFirebaseSignIn, enabled = !firebaseSignInBusy) {
+          Text(if (firebaseSignInBusy) "Signing in…" else "Sign in")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { if (!firebaseSignInBusy) showFirebaseSignInDialog = false }) {
+          Text("Cancel")
+        }
+      },
+    )
   }
 }
 

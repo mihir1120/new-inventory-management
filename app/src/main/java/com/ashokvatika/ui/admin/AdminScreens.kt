@@ -2,10 +2,21 @@ package com.ashokvatika.ui.admin
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
+import android.os.CancellationSignal
 import android.os.Environment
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import android.util.LruCache
 import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -25,6 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +89,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mail
@@ -165,6 +178,8 @@ import com.ashokvatika.ui.components.NumericKeypad
 import com.ashokvatika.domain.model.CartProductItem
 import com.ashokvatika.domain.model.DashboardDestination
 import com.ashokvatika.domain.model.InventoryItem
+import com.ashokvatika.data.InventoryImportPreview
+import com.ashokvatika.data.InventorySpreadsheetImporter
 import com.ashokvatika.domain.model.OpenCartRow
 import com.ashokvatika.domain.model.SavedDeal
 import com.ashokvatika.domain.usecase.generateTransactionCode
@@ -173,6 +188,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -480,17 +496,14 @@ private enum class MediaPopupTab {
 fun AdminHomeScreen(
   pendingAccessRequests: List<AdminAccessRequest>,
   syncMessage: String?,
+  firebaseConnected: Boolean,
+  onFirebaseAction: () -> Unit,
   onApproveRequest: (String) -> Unit,
   onDenyRequest: (String) -> Unit,
   onTileClick: (DashboardDestination) -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
-  var animateTiles by remember { mutableStateOf(false) }
-
-  LaunchedEffect(Unit) {
-    delay(120)
-    animateTiles = true
-  }
+  val animateTiles = true
 
   BoxWithConstraints(
     modifier = Modifier
@@ -539,6 +552,10 @@ fun AdminHomeScreen(
         markSize = layout.brandMarkSize,
         fixedHeight = dashboardLogoHeight,
       )
+
+      TextButton(onClick = onFirebaseAction) {
+        Text(if (firebaseConnected) "Firebase connected · disconnect" else "Connect admin to Firebase")
+      }
 
       if (!syncMessage.isNullOrBlank()) {
         Spacer(modifier = Modifier.height(if (compactScreen) 10.dp else 14.dp))
@@ -614,7 +631,7 @@ fun DocsHomeScreen(
   onOpenArt: () -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
-  var animateTiles by remember { mutableStateOf(false) }
+  val animateTiles = true
   val tileRows = listOf(
     listOf(
       DocsMenuItem("Address", 40),
@@ -631,11 +648,6 @@ fun DocsHomeScreen(
   )
 
   BackHandler(onBack = onBack)
-
-  LaunchedEffect(Unit) {
-    delay(120)
-    animateTiles = true
-  }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -748,7 +760,7 @@ fun ArtHomeScreen(
   onOpenProfile: () -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
-  var animateTiles by remember { mutableStateOf(false) }
+  val animateTiles = true
   val tileRows = listOf(
     listOf(
       DocsMenuItem("Brochure", 40),
@@ -765,11 +777,6 @@ fun ArtHomeScreen(
   )
 
   BackHandler(onBack = onBack)
-
-  LaunchedEffect(Unit) {
-    delay(120)
-    animateTiles = true
-  }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -1429,7 +1436,7 @@ private fun LiveCartPreviewItem(
   compactScreen: Boolean,
   previewSize: Dp,
 ) {
-  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 720)
+  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 360)
   Column(
     modifier = Modifier.widthIn(min = previewSize, max = previewSize + 12.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
@@ -3803,6 +3810,8 @@ fun CategoryScreen(
   initialItem: InventoryItem?,
   onConfirmBack: (InventoryItem) -> Unit,
   onIncompleteBack: (InventoryItem) -> Unit,
+  onExitWithoutChanges: () -> Unit,
+  onHome: () -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
   val seed = remember(title, initialItem) { initialItem?.toProductDetail() ?: detailFor(title) }
@@ -3933,6 +3942,10 @@ fun CategoryScreen(
     uriString = selectedMediaUri?.takeUnless { isVideoUri(context, it) },
     maxDimensionPx = 1400,
   )
+  var showFullImage by remember(selectedMediaUri) { mutableStateOf(false) }
+  if (showFullImage && selectedImageBitmap != null) {
+    FullImagePreview(image = selectedImageBitmap!!, onDismiss = { showFullImage = false })
+  }
 
   val batch = batchText.toIntOrNull() ?: 0
   val sale = saleText.toIntOrNull() ?: 0
@@ -3964,6 +3977,18 @@ fun CategoryScreen(
   val discountTotal = (mrpTotal - priceTotal).coerceAtLeast(0)
   val checkout = priceTotal
   val checkoutDisplay = if (checkoutText.isNotBlank()) checkoutText else if (checkout > 0) formatAmount(checkout) else ""
+  val hasProductChanges = productName != seed.name ||
+    batchText != seed.batch || saleText != seed.sale || rentText != seed.rent ||
+    detailsText != seed.details || selectedDetailsDate != seed.details ||
+    unitPrice.toString() != seed.price || landingPriceText != seed.landingPrice ||
+    checkoutDisplay != seed.checkout || vendorNameText != seed.vendorName ||
+    vendorPhoneText != seed.vendorPhone || vendorEmailText != seed.vendorEmail ||
+    mediaUris != initialMediaUris ||
+    mediaPrimaryTitleText != seed.templatePrimaryTitle ||
+    mediaPrimaryDescriptionText != seed.templatePrimaryDescription ||
+    mediaSecondaryTitleText != seed.templateSecondaryTitle ||
+    mediaSecondaryDescriptionText != seed.templateSecondaryDescription ||
+    mediaContactText != seed.templateContact
   val headline = "${availableStock}/${formatAmount(unitPrice)}"
   val confirmDetails = {
     detailsText = selectedDetailsDate
@@ -4027,7 +4052,10 @@ fun CategoryScreen(
     )
   }
 
-  BackHandler { showBackConfirm = true }
+  val requestBack = {
+    if (hasProductChanges) showBackConfirm = true else onExitWithoutChanges()
+  }
+  BackHandler { requestBack() }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -4144,12 +4172,18 @@ fun CategoryScreen(
           )
           .background(Accent, CircleShape)
           .clip(CircleShape)
-          .clickable {
-            if (selectedMediaUri != null) {
-              cameraCapturePendingConfirmation = false
-              showUploadOptions = !showUploadOptions
-            }
-          },
+          .combinedClickable(
+            onClick = {
+              if (selectedMediaUri != null) {
+                cameraCapturePendingConfirmation = false
+                showUploadOptions = !showUploadOptions
+              }
+            },
+            onLongClick = {
+              if (selectedImageBitmap != null) showFullImage = true
+            },
+            onLongClickLabel = "View full image",
+          ),
         contentAlignment = Alignment.Center,
       ) {
         val productImage = selectedImageBitmap
@@ -4648,7 +4682,21 @@ fun CategoryScreen(
         .width(contentWidth)
         .align(Alignment.TopCenter)
         .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
-      onBack = { showBackConfirm = true },
+      onBack = { requestBack() },
+      bottomAction = {
+        CircleIconAction(
+          size = headerActionSize,
+          icon = {
+            Icon(
+              imageVector = Icons.Filled.Home,
+              contentDescription = "Home",
+              tint = Accent,
+              modifier = Modifier.size(headerIconSize),
+            )
+          },
+          onClick = onHome,
+        )
+      },
       actionButtonSize = headerActionSize,
       actionIconSize = headerIconSize,
       actionSpacing = headerSpacing,
@@ -4668,18 +4716,56 @@ fun InventoryListScreen(
   title: DashboardDestination,
   items: List<InventoryItem>,
   onBack: () -> Unit,
+  onHome: () -> Unit,
   onAddItem: () -> Unit,
+  onImportItems: (List<InventoryItem>) -> Unit,
   onItemTap: (InventoryItem) -> Unit,
   onDeleteItem: (InventoryItem) -> Unit,
 ) {
   val dmSansThin = rememberDashboardFont()
   var searchQuery by rememberSaveable(title.name) { mutableStateOf("") }
+  var sortOrder by rememberSaveable(title.name) { mutableStateOf("Recent") }
+  var uploadSource by rememberSaveable(title.name) { mutableStateOf("All products") }
+  var showSortOptions by remember { mutableStateOf(false) }
   var pendingDeleteItem by remember { mutableStateOf<InventoryItem?>(null) }
-  val filteredItems = remember(items, searchQuery) {
-    if (searchQuery.isBlank()) {
-      items
+  var qrItem by remember { mutableStateOf<InventoryItem?>(null) }
+  var showAddOptions by remember { mutableStateOf(false) }
+  var importPreview by remember { mutableStateOf<InventoryImportPreview?>(null) }
+  var importError by remember { mutableStateOf<String?>(null) }
+  var importBusy by remember { mutableStateOf(false) }
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val spreadsheetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      importBusy = true
+      importError = null
+      scope.launch {
+        runCatching {
+          withContext(Dispatchers.IO) { InventorySpreadsheetImporter(context).read(uri, title) }
+        }.onSuccess { importPreview = it }
+          .onFailure { importError = it.message ?: "Unable to read this spreadsheet." }
+        importBusy = false
+      }
+    }
+  }
+  val requestAddItem = { showAddOptions = true }
+  val filteredItems = remember(items, searchQuery, sortOrder, uploadSource) {
+    val sourceItems = when (uploadSource) {
+      "Vendor uploads" -> items.filter { it.isVendorSpreadsheetUpload }
+      "Self uploads" -> items.filterNot { it.isVendorSpreadsheetUpload }
+      else -> items
+    }
+    val matchingItems = if (searchQuery.isBlank()) {
+      sourceItems
     } else {
-      items.filter { item -> item.name.contains(searchQuery.trim(), ignoreCase = true) }
+      sourceItems.filter { item -> item.name.contains(searchQuery.trim(), ignoreCase = true) }
+    }
+    when (sortOrder) {
+      "Name A–Z" -> matchingItems.sortedBy { it.name.lowercase(Locale.getDefault()) }
+      "Name Z–A" -> matchingItems.sortedByDescending { it.name.lowercase(Locale.getDefault()) }
+      "Price high to low" -> matchingItems.sortedByDescending { it.price.toLongOrNull() ?: 0L }
+      "Price low to high" -> matchingItems.sortedBy { it.price.toLongOrNull() ?: 0L }
+      else -> matchingItems
     }
   }
 
@@ -4698,10 +4784,13 @@ fun InventoryListScreen(
     val contentWidth = if (phoneScreen) maxWidth else minOf(maxWidth - if (compactScreen) 20.dp else 32.dp, 920.dp)
     val horizontalPadding = if (phoneScreen) OtcPhoneHeaderHorizontalPadding else if (compactScreen) 10.dp else 16.dp
     val headerTopPadding = if (phoneScreen) statusBarTopPadding + OtcPhoneHeaderTopPadding else OtcHeaderTopOffset
-    val topContentPadding = if (phoneScreen) maxHeight * 0.20f else OtcMainContentTopPadding
     val headerActionSize = if (phoneScreen) OtcPhoneHeaderActionSize else LockedHeaderActionSize
     val headerIconSize = if (phoneScreen) OtcPhoneHeaderIconSize else LockedHeaderIconSize
     val headerSpacing = if (phoneScreen) OtcPhoneHeaderSpacing else LockedHeaderActionSpacing
+    val topContentPadding = if (phoneScreen) {
+      maxOf(maxHeight * 0.20f, headerTopPadding + OtcPhoneHeaderActionTopPadding +
+        headerActionSize * 3f + headerSpacing * 2.3f + 12.dp)
+    } else OtcMainContentTopPadding
     val brandTextSize = when {
       maxWidth > 700.dp -> 46.sp
       compactScreen -> 28.sp
@@ -4739,7 +4828,7 @@ fun InventoryListScreen(
 
             AddInventoryButton(
               fontFamily = dmSansThin,
-              onClick = onAddItem,
+              onClick = requestAddItem,
               modifier = Modifier.fillMaxWidth(),
               label = "Add item",
             )
@@ -4760,7 +4849,7 @@ fun InventoryListScreen(
 
             AddInventoryButton(
               fontFamily = dmSansThin,
-              onClick = onAddItem,
+              onClick = requestAddItem,
               modifier = Modifier.weight(1f),
               label = "Add item",
             )
@@ -4778,7 +4867,11 @@ fun InventoryListScreen(
             shadowElevation = 0.dp,
           ) {
             Text(
-              text = "No items added yet. Start by adding a product to build this inventory list.",
+              text = if (items.isEmpty()) {
+                "No items added yet. Start by adding a product to build this inventory list."
+              } else {
+                "No products match the current search and upload source."
+              },
               modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
               textAlign = TextAlign.Center,
               color = Ink.copy(alpha = 0.62f),
@@ -4798,6 +4891,7 @@ fun InventoryListScreen(
             fontFamily = dmSansThin,
             onClick = { onItemTap(item) },
             onRequestDelete = { pendingDeleteItem = it },
+            onShowQr = { qrItem = item },
           )
         }
       }
@@ -4815,12 +4909,145 @@ fun InventoryListScreen(
       )
     }
 
+    qrItem?.let { item ->
+      InventoryQrDialog(item = item, onDismiss = { qrItem = null })
+    }
+
+    if (showAddOptions) {
+      AlertDialog(
+        onDismissRequest = { showAddOptions = false },
+        title = { Text("Add item") },
+        text = {
+          Column {
+            Text("Choose how to add products to inventory.")
+            TextButton(onClick = {
+              showAddOptions = false
+              onAddItem()
+            }) { Text("1. Self") }
+            TextButton(onClick = {
+              showAddOptions = false
+              spreadsheetLauncher.launch(arrayOf(
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+                "text/csv",
+                "text/comma-separated-values",
+              ))
+            }) { Text("2. Vendor") }
+          }
+        },
+        confirmButton = { TextButton(onClick = { showAddOptions = false }) { Text("Cancel") } },
+      )
+    }
+    if (importBusy) {
+      AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Reading spreadsheet") },
+        text = { Text("Preparing the inventory preview…") },
+        confirmButton = {},
+      )
+    }
+    importError?.let { error ->
+      AlertDialog(
+        onDismissRequest = { importError = null },
+        title = { Text("Excel upload failed") },
+        text = { Text(error) },
+        confirmButton = { TextButton(onClick = { importError = null }) { Text("OK") } },
+      )
+    }
+    importPreview?.let { preview ->
+      val counts = preview.items.groupingBy { it.category }.eachCount()
+      AlertDialog(
+        onDismissRequest = { importPreview = null },
+        title = { Text("Review Excel upload") },
+        text = {
+          Text(buildString {
+            append("${preview.items.size} products ready: ")
+            append(listOf(DashboardDestination.Plants, DashboardDestination.Pots, DashboardDestination.Supplies)
+              .joinToString { "${it.name} ${counts[it] ?: 0}" })
+            if (preview.skippedRows > 0) append("\n${preview.skippedRows} blank or invalid rows skipped.")
+            preview.warnings.take(3).forEach { append("\n$it") }
+            if (preview.warnings.size > 3) append("\nAnd ${preview.warnings.size - 3} more warnings.")
+          })
+        },
+        confirmButton = {
+          TextButton(
+            enabled = preview.items.isNotEmpty(),
+            onClick = {
+              onImportItems(preview.items)
+              importPreview = null
+            },
+          ) { Text("Import products") }
+        },
+        dismissButton = { TextButton(onClick = { importPreview = null }) { Text("Cancel") } },
+      )
+    }
+
     OtcActionOnlyHeader(
       modifier = Modifier
         .width(contentWidth)
         .align(Alignment.TopCenter)
         .padding(start = horizontalPadding, top = headerTopPadding, end = horizontalPadding),
       onBack = onBack,
+      middleAction = {
+        CircleIconAction(
+          size = headerActionSize,
+          borderColor = Accent,
+          borderWidth = 2.dp,
+          icon = {
+            Icon(
+              imageVector = Icons.Filled.Home,
+              contentDescription = "Home",
+              tint = Accent,
+              modifier = Modifier.size(headerIconSize),
+            )
+          },
+          onClick = onHome,
+        )
+      },
+      bottomAction = {
+        Box {
+          CircleIconAction(
+            size = headerActionSize,
+            borderColor = Accent,
+            borderWidth = 2.dp,
+            icon = {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.Sort,
+                contentDescription = "Sort inventory",
+                tint = Accent,
+                modifier = Modifier.size(headerIconSize),
+              )
+            },
+            onClick = { showSortOptions = true },
+          )
+          DropdownMenu(
+            expanded = showSortOptions,
+            onDismissRequest = { showSortOptions = false },
+          ) {
+            Text("Show", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            listOf("All products", "Vendor uploads", "Self uploads").forEach { option ->
+              DropdownMenuItem(
+                text = { Text(option) },
+                onClick = {
+                  uploadSource = option
+                  showSortOptions = false
+                },
+              )
+            }
+            Text("Sort by", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            listOf("Recent", "Name A–Z", "Name Z–A", "Price high to low", "Price low to high").forEach { option ->
+              DropdownMenuItem(
+                text = { Text(option) },
+                onClick = {
+                  sortOrder = option
+                  showSortOptions = false
+                },
+              )
+            }
+          }
+        }
+      },
       actionButtonSize = headerActionSize,
       actionIconSize = headerIconSize,
       actionSpacing = headerSpacing,
@@ -5046,8 +5273,17 @@ private fun OtcActionOnlyHeader(
           onClick = onBack,
         )
       }
-      OtcHeaderActionSlot(actionButtonSize, middleAction)
-      OtcHeaderActionSlot(actionButtonSize, bottomAction)
+      middleAction?.let { action -> OtcHeaderActionSlot(actionButtonSize, action) }
+      bottomAction?.let { action ->
+        OtcHeaderActionSlot(
+          size = actionButtonSize,
+          content = {
+            Box(modifier = Modifier.offset(y = actionSpacing * 0.3f), contentAlignment = Alignment.Center) {
+              action()
+            }
+          },
+        )
+      }
     }
   }
 }
@@ -5202,13 +5438,19 @@ private fun InventoryItemCard(
   fontFamily: FontFamily,
   onClick: () -> Unit,
   onRequestDelete: (InventoryItem) -> Unit,
+  onShowQr: () -> Unit,
 ) {
-  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 720)
+  // Inventory thumbnails are small on screen; decoding larger images makes fast scrolling janky.
+  val imageBitmap by rememberDecodedImage(item.imageUri, maxDimensionPx = 192)
   val batchValue = item.batch.toIntOrNull() ?: 0
   val saleValue = item.sale.toIntOrNull() ?: 0
   val rentValue = item.rent.toIntOrNull() ?: 0
   val availableStock = (batchValue - saleValue - rentValue).coerceAtLeast(0)
   val inStock = availableStock > 0
+  val uploadedCard = item.isVendorSpreadsheetUpload
+  val uploadedPurple = Color(0xFFC43DF1).copy(alpha = 0.71f)
+  val uploadedOrange = Color(0xFFFA8C1D)
+  val uploadedGrey = Color(0xFFD9D9D9)
   val swipeOffset = remember { Animatable(0f) }
   val scope = rememberCoroutineScope()
   var dragConsumed by remember(item.id) { mutableStateOf(false) }
@@ -5237,7 +5479,7 @@ private fun InventoryItemCard(
         .fillMaxWidth()
         .offset { IntOffset(swipeOffset.value.toInt(), 0) }
       .shadow(
-          elevation = 14.dp,
+          elevation = 3.dp,
           shape = CardShape,
           ambientColor = SoftGreyShadow,
           spotColor = SoftGreyShadow,
@@ -5255,17 +5497,13 @@ private fun InventoryItemCard(
               scope.launch { swipeOffset.snapTo(updated) }
             },
             onDragEnd = {
-              scope.launch {
-                if (swipeOffset.value > 132f) {
-                  onRequestDelete(item)
-                }
-                swipeOffset.animateTo(0f, animationSpec = tween(durationMillis = 220))
+              if (swipeOffset.value > 132f) {
+                onRequestDelete(item)
               }
+              scope.launch { swipeOffset.animateTo(0f, animationSpec = tween(durationMillis = 220)) }
             },
             onDragCancel = {
-              scope.launch {
-                swipeOffset.animateTo(0f, animationSpec = tween(durationMillis = 220))
-              }
+              scope.launch { swipeOffset.animateTo(0f, animationSpec = tween(durationMillis = 220)) }
               dragConsumed = false
             },
           )
@@ -5277,7 +5515,7 @@ private fun InventoryItemCard(
           dragConsumed = false
         },
       shape = CardShape,
-      color = Color.White,
+      color = if (uploadedCard) uploadedPurple else Color.White,
       tonalElevation = 0.dp,
       shadowElevation = 0.dp,
     ) {
@@ -5293,7 +5531,7 @@ private fun InventoryItemCard(
             .height(imageHeight)
             .aspectRatio(0.68f)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
-            .background(Color(0xFFF3F3F3), androidx.compose.foundation.shape.RoundedCornerShape(24.dp)),
+            .background(if (uploadedCard) uploadedGrey else Color(0xFFF3F3F3), androidx.compose.foundation.shape.RoundedCornerShape(24.dp)),
           contentAlignment = Alignment.Center,
         ) {
           val previewBitmap = imageBitmap
@@ -5307,7 +5545,7 @@ private fun InventoryItemCard(
           } else {
             Text(
               text = item.name.take(2).uppercase(Locale.US),
-              color = Accent,
+              color = if (uploadedCard) Color(0xFF010101).copy(alpha = 0.5f) else Accent,
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Normal,
@@ -5323,7 +5561,7 @@ private fun InventoryItemCard(
         ) {
           Text(
             text = item.name,
-            color = Ink,
+            color = if (uploadedCard) Color.White else Ink,
             style = TextStyle(
               fontFamily = fontFamily,
               fontWeight = FontWeight.Normal,
@@ -5337,7 +5575,7 @@ private fun InventoryItemCard(
           ) {
             Text(
               text = if (inStock) "In-stock" else "Out of stock",
-              color = if (inStock) AccentGreen else Color(0xFFD85656),
+              color = if (uploadedCard) Color(0xFFFEFEFE) else if (inStock) AccentGreen else Color(0xFFD85656),
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Normal,
@@ -5346,7 +5584,7 @@ private fun InventoryItemCard(
             )
             Text(
               text = availableStock.toString(),
-              color = Ink.copy(alpha = 0.88f),
+              color = if (uploadedCard) Color.White else Ink.copy(alpha = 0.88f),
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Thin,
@@ -5359,14 +5597,15 @@ private fun InventoryItemCard(
             horizontalArrangement = Arrangement.spacedBy(if (compactCard) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            InventoryMetricPill("Batch", batchValue.toString(), fontFamily, compactCard)
-            InventoryMetricPill("Sale", saleValue.toString(), fontFamily, compactCard)
-            InventoryMetricPill("Rent", rentValue.toString(), fontFamily, compactCard)
+            val metricColor = if (uploadedCard) uploadedOrange else Accent
+            InventoryMetricPill("Batch", batchValue.toString(), fontFamily, compactCard, metricColor)
+            InventoryMetricPill("Sale", saleValue.toString(), fontFamily, compactCard, metricColor)
+            InventoryMetricPill("Rent", rentValue.toString(), fontFamily, compactCard, metricColor)
           }
           if (item.status == "incomplete") {
             Text(
               text = "incomplete",
-              color = Color(0xFFC04A44),
+              color = if (uploadedCard) Color(0xFFFEFEFE) else Color(0xFFC04A44),
               style = TextStyle(
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Normal,
@@ -5375,8 +5614,319 @@ private fun InventoryItemCard(
             )
           }
         }
+
+        TextButton(
+          onClick = onShowQr,
+          modifier = Modifier.padding(top = 2.dp),
+        ) {
+          Text("QR", color = if (uploadedCard) Color.White else Accent, fontWeight = FontWeight.SemiBold)
+        }
       }
     }
+  }
+}
+
+@Composable
+private fun InventoryQrDialog(
+  item: InventoryItem,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  val qrValue = remember(item.id) { "ashokvatika://product/${item.id}" }
+  var selectedSizeMm by remember(item.id) { mutableStateOf<Int?>(null) }
+  var quantityText by remember(item.id) { mutableStateOf("1") }
+  var busy by remember { mutableStateOf(false) }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+  val qrBitmap by produceState<Bitmap?>(initialValue = null, key1 = qrValue) {
+    value = withContext(Dispatchers.Default) { runCatching { createBrandedQrBitmap(context, qrValue) }.getOrNull() }
+  }
+  val quantity = quantityText.toIntOrNull()?.takeIf { it in 1..500 }
+  val previewQr = qrBitmap
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Product QR codes") },
+    text = {
+      Column(
+        modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text(item.name, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+        Text("Choose printed QR size", style = TextStyle(fontSize = 14.sp), color = Ink.copy(alpha = 0.68f))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          listOf(25, 50, 70, 100).chunked(2).forEach { sizeRow ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              sizeRow.forEach { size ->
+                Surface(
+                  onClick = { selectedSizeMm = size },
+                  modifier = Modifier.weight(1f),
+                  shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                  color = if (selectedSizeMm == size) BrandOrange else Color(0xFFF1E4D6),
+                ) {
+                  Text(
+                    "$size × $size mm",
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 10.dp),
+                    color = if (selectedSizeMm == size) Color.White else Ink,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                  )
+                }
+              }
+            }
+          }
+        }
+        if (previewQr != null) {
+          Image(
+            bitmap = previewQr.asImageBitmap(),
+            contentDescription = "QR code for ${item.name}",
+            modifier = Modifier.size(((selectedSizeMm ?: 70) * 1.8f).dp),
+          )
+        } else {
+          Text("Creating QR code…", modifier = Modifier.padding(24.dp))
+        }
+        selectedSizeMm?.let { size ->
+          Text("Printed at $size × $size mm", color = Ink.copy(alpha = 0.68f), fontSize = 13.sp)
+          Text("Quantity (1–500)", style = TextStyle(fontSize = 14.sp), color = Ink.copy(alpha = 0.68f))
+          Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            color = Color.White,
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Text(
+              quantityText.ifBlank { "0" },
+              modifier = Modifier.padding(12.dp),
+              color = Ink,
+              textAlign = TextAlign.Center,
+              fontSize = 24.sp,
+            )
+          }
+          NumericKeypad(
+            modifier = Modifier.fillMaxWidth(),
+            onDigit = { digit ->
+              val next = (quantityText + digit).trimStart('0').ifBlank { "0" }
+              if (next.length <= 3 && (next.toIntOrNull() ?: 0) <= 500) quantityText = next
+            },
+            onBackspace = { quantityText = quantityText.dropLast(1) },
+            onConfirm = { if (quantity != null) errorMessage = null },
+          )
+          if (busy) Text("Preparing PDF…", color = BrandOrange)
+          errorMessage?.let { Text(it, color = Color(0xFFC04A44), fontSize = 13.sp) }
+        }
+      }
+    },
+    confirmButton = {
+      Column(horizontalAlignment = Alignment.End) {
+        val size = selectedSizeMm
+        if (size != null && quantity != null) {
+          TextButton(enabled = !busy && qrBitmap != null, onClick = {
+            val bitmap = qrBitmap ?: return@TextButton
+            busy = true
+            errorMessage = null
+            scope.launch {
+              runCatching { withContext(Dispatchers.IO) { buildQrPrintPdf(bitmap, size, quantity) } }
+                .onSuccess { pdf ->
+                  runCatching { shareQrPdf(context, item, size, pdf) }
+                    .onFailure { errorMessage = "PDF sharing failed: ${it.message.orEmpty()}" }
+                }
+                .onFailure { errorMessage = "PDF could not be created: ${it.message.orEmpty()}" }
+              busy = false
+            }
+          }) { Text("Share PDF") }
+          TextButton(enabled = !busy && qrBitmap != null, onClick = {
+            val bitmap = qrBitmap ?: return@TextButton
+            busy = true
+            errorMessage = null
+            scope.launch {
+              runCatching { withContext(Dispatchers.IO) { buildQrPrintPdf(bitmap, size, quantity) } }
+                .onSuccess { pdf -> runCatching { printQrPdf(context, item, size, pdf) }
+                  .onFailure { errorMessage = "Printing failed: ${it.message.orEmpty()}" } }
+                .onFailure { errorMessage = "PDF could not be created: ${it.message.orEmpty()}" }
+              busy = false
+            }
+          }) { Text("Print") }
+        }
+      }
+    },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+  )
+}
+
+private fun createBrandedQrBitmap(context: android.content.Context, qrValue: String): Bitmap {
+  val hints = mapOf(
+    com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.H,
+    com.google.zxing.EncodeHintType.MARGIN to 4,
+  )
+  // Ask ZXing for the native module matrix; requesting 1000 px here makes each
+  // module a single pixel and destroys the round-module and finder styling.
+  val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(qrValue, com.google.zxing.BarcodeFormat.QR_CODE, 1, 1, hints)
+  val bitmap = Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)
+  val canvas = Canvas(bitmap)
+  canvas.drawColor(android.graphics.Color.WHITE)
+  val module = 1000f / matrix.width
+  val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK }
+  val quietZone = 4
+  val finderStart = quietZone
+  val finderEnd = matrix.width - quietZone - 7
+  fun inFinder(x: Int, y: Int, left: Int, top: Int): Boolean =
+    x in left until left + 7 && y in top until top + 7
+  for (y in 0 until matrix.height) for (x in 0 until matrix.width) {
+    if (!matrix[x, y]) continue
+    if (inFinder(x, y, finderStart, finderStart) ||
+      inFinder(x, y, finderEnd, finderStart) ||
+      inFinder(x, y, finderStart, finderEnd)
+    ) continue
+    canvas.drawCircle((x + 0.5f) * module, (y + 0.5f) * module, module * 0.43f, paint)
+  }
+  val finderCenters = listOf(
+    finderStart + 3.5f to finderStart + 3.5f,
+    finderEnd + 3.5f to finderStart + 3.5f,
+    finderStart + 3.5f to finderEnd + 3.5f,
+  )
+  finderCenters.forEach { (cx, cy) ->
+    val centerX = cx * module
+    val centerY = cy * module
+    canvas.drawCircle(centerX, centerY, 3.5f * module, paint)
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(centerX, centerY, 2.5f * module, paint)
+    paint.color = android.graphics.Color.BLACK
+    canvas.drawCircle(centerX, centerY, 1.5f * module, paint)
+  }
+  val logo = BitmapFactory.decodeResource(context.resources, R.drawable.qr_logo_hq)
+  if (logo != null) {
+    val logoWidth = 540f
+    val logoHeight = logoWidth * logo.height / logo.width
+    val center = 500f
+    val panel = RectF(center - 290f, center - 98f, center + 290f, center + 98f)
+    val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+    canvas.drawRoundRect(panel, 42f, 42f, panelPaint)
+    val logoRect = RectF(
+      center - logoWidth / 2,
+      center - logoHeight / 2,
+      center + logoWidth / 2,
+      center + logoHeight / 2,
+    )
+    canvas.drawBitmap(logo, null, logoRect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+    logo.recycle()
+  }
+  return bitmap
+}
+
+private fun buildQrPrintPdf(qrBitmap: Bitmap, sizeMm: Int, quantity: Int): ByteArray {
+  val pageWidth = 595
+  val pageHeight = 842
+  val qrSize = sizeMm * 72f / 25.4f
+  val safeMargin = 10f * 72f / 25.4f
+  val gap = 10f * 72f / 25.4f
+  val columns = ((pageWidth - safeMargin * 2 + gap) / (qrSize + gap)).toInt().coerceAtLeast(1)
+  val rowsPerPage = ((pageHeight - safeMargin * 2 + gap) / (qrSize + gap)).toInt().coerceAtLeast(1)
+  val perPage = rowsPerPage * columns
+  val document = PdfDocument()
+  var index = 0
+  var pageNumber = 1
+  val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+  while (index < quantity) {
+    val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber++).create())
+    page.canvas.drawColor(android.graphics.Color.WHITE)
+    val itemsOnPage = minOf(perPage, quantity - index)
+    val rowsOnPage = (itemsOnPage + columns - 1) / columns
+    val gridHeight = rowsOnPage * qrSize + (rowsOnPage - 1) * gap
+    val gridTop = (pageHeight - gridHeight) / 2f
+    repeat(itemsOnPage) { slot ->
+      val column = slot % columns
+      val row = slot / columns
+      val itemsInRow = minOf(columns, itemsOnPage - row * columns)
+      val gridWidth = itemsInRow * qrSize + (itemsInRow - 1) * gap
+      val gridLeft = (pageWidth - gridWidth) / 2f
+      val left = gridLeft + column * (qrSize + gap)
+      val top = gridTop + row * (qrSize + gap)
+      page.canvas.drawBitmap(qrBitmap, null, RectF(left, top, left + qrSize, top + qrSize), paint)
+      index++
+    }
+    document.finishPage(page)
+  }
+  return java.io.ByteArrayOutputStream().use { output ->
+    document.writeTo(output)
+    document.close()
+    output.toByteArray()
+  }
+}
+
+private fun shareQrPdf(context: android.content.Context, item: InventoryItem, sizeMm: Int, pdf: ByteArray) {
+  val directory = File(context.filesDir, "qr-share").apply { mkdirs() }
+  val file = File(directory, "product-${item.id.replace(Regex("[^A-Za-z0-9_-]"), "_")}-${sizeMm}mm.pdf")
+  file.writeBytes(pdf)
+  val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+  val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+    type = "application/pdf"
+    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  }
+  context.startActivity(android.content.Intent.createChooser(intent, "Share QR code PDF"))
+}
+
+private fun printQrPdf(context: android.content.Context, item: InventoryItem, sizeMm: Int, pdf: ByteArray) {
+  val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as PrintManager
+  printManager.print("${item.name} QR codes", object : PrintDocumentAdapter() {
+    override fun onLayout(
+      oldAttributes: PrintAttributes?,
+      newAttributes: PrintAttributes?,
+      cancellationSignal: CancellationSignal,
+      callback: LayoutResultCallback,
+      extras: android.os.Bundle?,
+    ) {
+      if (cancellationSignal.isCanceled) {
+        callback.onLayoutCancelled()
+        return
+      }
+      callback.onLayoutFinished(
+        PrintDocumentInfo.Builder("product-qr-${sizeMm}mm.pdf")
+          .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+          .setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+          .build(),
+        true,
+      )
+    }
+
+    override fun onWrite(
+      pages: Array<out PageRange>,
+      destination: ParcelFileDescriptor,
+      cancellationSignal: CancellationSignal,
+      callback: WriteResultCallback,
+    ) {
+      if (cancellationSignal.isCanceled) {
+        callback.onWriteCancelled()
+        return
+      }
+      runCatching {
+        FileOutputStream(destination.fileDescriptor).use { it.write(pdf) }
+        callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+      }.onFailure { callback.onWriteFailed(it.message) }
+    }
+  }, null)
+}
+
+private fun shareInventoryQr(
+  context: android.content.Context,
+  item: InventoryItem,
+  bitmap: Bitmap,
+) {
+  runCatching {
+    val directory = File(context.filesDir, "qr-share").apply { mkdirs() }
+    val file = File(directory, "product-${item.id.replace(Regex("[^A-Za-z0-9_-]"), "_")}.png")
+    file.outputStream().use { output ->
+      check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Could not save QR image" }
+    }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+      type = "image/png"
+      putExtra(android.content.Intent.EXTRA_STREAM, uri)
+      addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(sendIntent, "Share product QR"))
+  }.onFailure { error ->
+    Toast.makeText(context, "QR share failed: ${error.message}", Toast.LENGTH_LONG).show()
   }
 }
 
@@ -5386,10 +5936,11 @@ private fun InventoryMetricPill(
   value: String,
   fontFamily: FontFamily,
   compact: Boolean = false,
+  color: Color = Accent,
 ) {
   Surface(
     shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-    color = Accent,
+    color = color,
     tonalElevation = 0.dp,
     shadowElevation = 0.dp,
   ) {
@@ -10817,19 +11368,26 @@ private fun BrochureImageContainer(
   val imageBitmap by rememberDecodedImage(uriString, maxDimensionPx = 1600)
   val hasImage = imageBitmap != null
   var actionButtonsVisible by remember(uriString) { mutableStateOf(uriString.isNullOrBlank()) }
+  var showFullImage by remember(uriString) { mutableStateOf(false) }
+  if (showFullImage && imageBitmap != null) {
+    FullImagePreview(image = imageBitmap!!, onDismiss = { showFullImage = false })
+  }
 
   Surface(
     modifier = modifier
       .fillMaxWidth()
       .height(height)
-      .clickable(
+      .combinedClickable(
         enabled = openPickerOnContainerTap || hasImage,
-      ) {
-        when {
-          openPickerOnContainerTap && !hasImage -> onAddImageFromDrive()
-          hasImage -> actionButtonsVisible = !actionButtonsVisible
-        }
-      },
+        onClick = {
+          when {
+            openPickerOnContainerTap && !hasImage -> onAddImageFromDrive()
+            hasImage -> actionButtonsVisible = !actionButtonsVisible
+          }
+        },
+        onLongClick = { if (hasImage) showFullImage = true },
+        onLongClickLabel = "View full image",
+      ),
     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
     color = Color(0xFFF9E5D9),
     tonalElevation = 0.dp,
@@ -11176,6 +11734,10 @@ private fun ProductImage(
   onAddImage: () -> Unit,
 ) {
   val imageBitmap by rememberDecodedImage(uriString, maxDimensionPx = 1600)
+  var showFullImage by remember(uriString) { mutableStateOf(false) }
+  if (showFullImage && imageBitmap != null) {
+    FullImagePreview(image = imageBitmap!!, onDismiss = { showFullImage = false })
+  }
 
   Box(
     modifier = Modifier
@@ -11192,7 +11754,12 @@ private fun ProductImage(
         contentScale = contentScale,
         modifier = Modifier
           .fillMaxSize()
-          .padding(if (contentScale == ContentScale.Fit) 4.dp else 0.dp),
+          .padding(if (contentScale == ContentScale.Fit) 4.dp else 0.dp)
+          .combinedClickable(
+            onClick = {},
+            onLongClick = { showFullImage = true },
+            onLongClickLabel = "View full image",
+          ),
       )
     } else {
       Surface(
@@ -13809,26 +14376,14 @@ private fun DashboardTile(
     icon == null -> 30.sp
     else -> 28.sp
   }
-  val tileAlpha by animateFloatAsState(
+  val entranceProgress by animateFloatAsState(
     targetValue = if (animateTiles) 1f else 0f,
-    animationSpec = tween(durationMillis = 780, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-    label = "$title-tile-alpha",
-  )
-  val tileOffset by animateFloatAsState(
-    targetValue = if (animateTiles) 0f else 68f,
     animationSpec = tween(durationMillis = 860, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-    label = "$title-tile-offset",
+    label = "$title-tile-entrance",
   )
-  val tileScale by animateFloatAsState(
-    targetValue = if (animateTiles) 1f else 0.92f,
-    animationSpec = tween(durationMillis = 860, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-    label = "$title-tile-scale",
-  )
-  val titleAlpha by animateFloatAsState(
-    targetValue = if (animateTiles) 1f else 0f,
-    animationSpec = tween(durationMillis = 420, delayMillis = delayMillis + 540, easing = FastOutSlowInEasing),
-    label = "$title-text-alpha",
-  )
+  val tileOffset = 68f * (1f - entranceProgress)
+  val tileScale = 0.92f + 0.08f * entranceProgress
+  val titleAlpha = ((entranceProgress - 0.6f) / 0.4f).coerceIn(0f, 1f)
   val interactionSource = remember { MutableInteractionSource() }
   val isPressed by interactionSource.collectIsPressedAsState()
   val tileColor by animateColorAsState(
@@ -13845,6 +14400,7 @@ private fun DashboardTile(
         translationY = tileOffset
         scaleX = tileScale
         scaleY = tileScale
+        alpha = entranceProgress
       }
       .shadow(
         elevation = 18.dp,
@@ -13869,13 +14425,13 @@ private fun DashboardTile(
           kind = icon,
           modifier = Modifier
             .size((tileWidth * 0.29f).coerceAtLeast(48.dp))
-            .alpha(tileAlpha),
+            .alpha(entranceProgress),
         )
       }
 
       Text(
         text = title,
-        modifier = Modifier.alpha(titleAlpha * tileAlpha),
+        modifier = Modifier.alpha(titleAlpha),
         color = Color.White,
         textAlign = TextAlign.Center,
         style = TextStyle(

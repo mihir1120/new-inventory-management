@@ -9,7 +9,7 @@ class AdminAuthStore(
 ) {
   private val prefs = context.getSharedPreferences("admin_auth", Context.MODE_PRIVATE)
 
-  fun isProvisioned(): Boolean = true
+  fun isProvisioned(): Boolean = prefs.contains(KEY_PIN_HASH)
 
   fun setPin(pin: String) {
     val pinHash = sha256("pin:$pin")
@@ -35,10 +35,9 @@ class AdminAuthStore(
   }
 
   fun verifyPin(pin: String): Boolean {
-    if (pin == DEFAULT_PIN) return true
     val stored = prefs.getString(KEY_PIN_HASH, null) ?: return false
     val candidate = sha256("pin:$pin")
-    return stored == candidate
+    return MessageDigest.isEqual(stored.toByteArray(Charsets.UTF_8), candidate.toByteArray(Charsets.UTF_8))
   }
 
   fun clear() {
@@ -52,7 +51,6 @@ class AdminAuthStore(
 
   companion object {
     const val MinPinLength = 6
-    const val DefaultAdminPin = "123"
 
     fun validatePin(pin: String): String? {
       if (pin.length < MinPinLength) return "Use at least $MinPinLength digits."
@@ -71,7 +69,6 @@ class AdminAuthStore(
       }
     }
 
-    private const val DEFAULT_PIN = DefaultAdminPin
     private const val KEY_PIN_HASH = "pin_hash"
     private const val KEY_SESSION_ACTIVE = "session_active"
     private const val KEY_FIREBASE_SESSION_CLEARED = "firebase_session_cleared"
